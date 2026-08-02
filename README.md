@@ -1,4 +1,4 @@
-# pine-scripts
+# trading-view-scripts
 
 Pine Script v6 indicators for TradingView.
 
