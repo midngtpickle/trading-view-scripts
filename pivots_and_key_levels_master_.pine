@@ -58,9 +58,9 @@ position_labels = input.string('Left', 'Label Position', options = ['Left', 'Rig
 show_p = input.bool(title = 'Show Pivot (P)', defval = true, group = grp_piv_lvl)
 show_r1 = input.bool(title = 'Show R1/S1', defval = true, group = grp_piv_lvl)
 show_r2 = input.bool(title = 'Show R2/S2', defval = true, group = grp_piv_lvl)
-show_r3 = input.bool(title = 'Show R3/S3', defval = true, group = grp_piv_lvl)
-show_r4 = input.bool(title = 'Show R4/S4', defval = true, group = grp_piv_lvl)
-show_r5 = input.bool(title = 'Show R5/S5', defval = true, group = grp_piv_lvl)
+show_r3 = input.bool(title = 'Show R3/S3', defval = true, group = grp_piv_lvl, tooltip = 'Carries the H4/L4 value from the calculation. In published Camarilla material H4/L4 is the breakout level, so this line is not the "far extreme, rarely reached" that R3 means in standard pivot notation.')
+show_r4 = input.bool(title = 'Show R4/S4', defval = true, group = grp_piv_lvl, tooltip = 'Carries the H5/L5 value from the calculation.')
+show_r5 = input.bool(title = 'Show R5/S5', defval = true, group = grp_piv_lvl, tooltip = 'Carries the H6/L6 value from the calculation. TradingView\'s built-in Camarilla plots this same value at its R5, but the levels in between will not line up between the two indicators.')
 
 // Color Settings
 p_color = input.color(color.orange, 'Pivot Color', group = grp_piv_col)
@@ -215,7 +215,27 @@ fibonacci() =>
     array.push(r5, pivotX_Median + 1.618 * pivot_range)
     array.push(s5, pivotX_Median - 1.618 * pivot_range)
 
-// NOTE: Camarilla math left exactly as provided (per request).
+// NOTE: Camarilla math left exactly as provided (per request). This is a
+// deliberate custom variant, NOT the textbook Camarilla equation. Do not
+// "correct" it against published formulas.
+//
+// LEVEL NAMING — read this before cross-referencing any Camarilla material.
+// The internal H/L values are stored into the R/S arrays with a deliberate
+// one-step shift, and H1/L1 are not plotted at all:
+//
+//     plotted as ...  R1   R2   R3   R4   R5
+//     comes from ...  H2   H3   H4   H5   H6
+//     plotted as ...  S1   S2   S3   S4   S5
+//     comes from ...  L2   L3   L4   L5   L6
+//
+// Consequences worth knowing:
+//   * This script's R3/S3 carries the H4/L4 value. In published Camarilla
+//     material H4/L4 is the breakout level, so R3 here is NOT the "far
+//     extreme, rarely reached" that R3 means in standard pivot notation.
+//   * TradingView's built-in Pivot Points Standard → Camarilla plots only
+//     five levels and puts (prevHigh / prevLow) × prevClose at its R5. That
+//     value lives at this script's R5 too, but the levels in between will not
+//     line up, so the two indicators are not directly comparable.
 camarilla() =>
     pivotX_Median = (pivotX_prev_high + pivotX_prev_low + pivotX_prev_close) / 3
     pivot_range = pivotX_prev_high - pivotX_prev_low
@@ -565,6 +585,28 @@ width_py = input.int(3, 'Width', minval=1, maxval=10, group=grp_yearly, inline='
 // 1. Fetch Data
 // "previous period" levels use [1] + lookahead_on (confirmed prior period, non-repainting).
 // "current period" levels use no-offset + lookahead_off (developing period, updates live by design).
+//
+// WHY THE CURRENT-PERIOD PATTERN IS CORRECT HERE, AND WHERE IT IS NOT.
+// request.security(..., lookahead_off) with no offset returns two different
+// things depending on the bar: on a HISTORICAL bar it returns the last CLOSED
+// higher-timeframe value (so mid-week it hands back last week's high), and on
+// a REALTIME bar it returns the live developing value.
+//
+// That is fine in this script because every key level is drawn inside
+// `if master_key and barstate.islast` — only the realtime bar is ever read, so
+// only the developing value is ever displayed. Two caveats follow from that:
+//   * In bar-replay, barstate.islast is a historical bar, so the "current"
+//     week/month/year lines will show the PREVIOUS period's extreme.
+//   * Do not reuse these variables in an alertcondition, or port them into a
+//     strategy. There the historical path is evaluated on every bar and the
+//     backtest silently trades a different series than the live script.
+//
+// Computing these natively with a timeframe.change() reset (the way the Monday
+// range below is built) would fix the replay case, but it would BREAK the
+// monthly and yearly levels on intraday charts: native accumulation only sees
+// the bars actually loaded, which on a 5m chart is a few weeks, not a year.
+// request.security is the right tool for deep periods; the constraint is that
+// its result is only trustworthy on the last bar.
 
 // --- Daily ---
 d_o = request.security(syminfo.tickerid, 'D', open, lookahead=barmerge.lookahead_off)

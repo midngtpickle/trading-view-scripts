@@ -99,6 +99,10 @@ climax_mult   = input.float(2.0, title="Climax Volume ×",       minval=1.0, ste
 aboveavg_mult = input.float(1.5, title="Above-Average Volume ×", minval=1.0, step=0.1, group="🕯️ PVSR Candle Settings", tooltip="Volume ≥ this × average marks an above-average (blue/violet) candle.")
 vol_lookback  = input.int(10,    title="Volume Lookback (bars)", minval=1,            group="🕯️ PVSR Candle Settings", tooltip="Bars used for the average volume and volume-spread high.")
 
+// How the lookback window is measured, and which climax test is active.
+pvsr_exclude_current = input.bool(true, title="Exclude current bar from lookback", group="🕯️ PVSR Candle Settings", tooltip="ON (canonical): the average volume and the volume-spread high are measured over the PREVIOUS N bars, matching the original PVSRA definition. OFF: the current bar sits inside its own comparison window, so an outsized bar raises the very threshold it is being tested against and can suppress its own signal. Turn OFF to reproduce charts drawn before this option existed.")
+pvsr_use_spread_leg  = input.bool(true, title="Use volume × spread climax leg",  group="🕯️ PVSR Candle Settings", tooltip="A bar is climax if volume ≥ climax × average OR volume × range is the highest of the lookback. That second leg fires whenever a bar sets a new lookback high in volume × range, which happens roughly once every N bars regardless of conditions, so it triggers far more often than the volume leg. Turn OFF to see classification driven by volume alone.")
+
 // PVSR Color Settings (shared)
 red_vector_color        = input.color(color.rgb(255, 82, 82),   title="Red Vector Candle",   group="🎨 PVSR Color Settings", inline="pvsrc")
 green_vector_color      = input.color(color.rgb(76, 175, 80),   title="Green Vector Candle", group="🎨 PVSR Color Settings", inline="pvsrc")
@@ -159,27 +163,41 @@ vwap_value = ta.vwap(close)
 // 🔹 CALCULATIONS - PVSR (single source of truth)
 // ==========================================
 
-bool  hasVolume         = not na(volume)
-float averageVolume     = ta.sma(volume, vol_lookback)
-float volumeSpread      = volume * (high - low)
-float highestVolSpread  = ta.highest(volumeSpread, vol_lookback)
+bool  hasVolume    = not na(volume)
+float volumeSpread = volume * (high - low)
+
+// Canonical PVSRA measures both comparisons over the PREVIOUS vol_lookback
+// bars. With the current bar inside its own window, a large bar drags its own
+// average up and can fail the very test it should pass, and the spread test
+// degenerates into "is this bar the highest of the last N including itself".
+// The [1] offset excludes the current bar from both.
+float averageVolume    = pvsr_exclude_current ? ta.sma(volume, vol_lookback)[1]            : ta.sma(volume, vol_lookback)
+float highestVolSpread = pvsr_exclude_current ? ta.highest(volumeSpread, vol_lookback)[1]  : ta.highest(volumeSpread, vol_lookback)
+
+// Split out so each climax leg can be toggled and read independently. The
+// spread leg fires roughly once every vol_lookback bars by construction, so it
+// dominates the volume leg unless it is switched off.
+bool climaxByVolume = hasVolume and not na(averageVolume)    and volume      >= climax_mult * averageVolume
+bool climaxBySpread = hasVolume and not na(highestVolSpread) and pvsr_use_spread_leg and volumeSpread >= highestVolSpread
+bool aboveAverage   = hasVolume and not na(averageVolume)    and volume      >= aboveavg_mult * averageVolume
 
 color pvsraColor  = na
 int   pvsraCode   = na
 bool  vectorAlert = false
 
-if hasVolume and (volume >= climax_mult * averageVolume or volumeSpread >= highestVolSpread)
+if climaxByVolume or climaxBySpread
     // Climax
     pvsraColor := close > open ? green_vector_color : red_vector_color
     pvsraCode  := close > open ? 3 : -3
     vectorAlert := true
-else if hasVolume and volume >= aboveavg_mult * averageVolume
+else if aboveAverage
     // Above average
     pvsraColor := close > open ? blue_vector_color : violet_vector_color
     pvsraCode  := close > open ? 2 : -2
     vectorAlert := true
 else
-    // Regular (also the fallback when volume is unavailable)
+    // Regular (also the fallback when volume is unavailable, and on the first
+    // vol_lookback bars where the shifted average is not yet defined)
     pvsraColor := close > open ? light_gray_candle_color : dark_grey_candle_color
     pvsraCode  := close > open ? 1 : -1
     vectorAlert := false
@@ -273,7 +291,10 @@ plot(master_show_sma and show_sma3 ? sma3 : na, title='SMA 3 (200)', color=col_s
 plot(master_show_vwap and show_vwap ? vwap_value : na, title="VWAP", color=col_vwap, linewidth=wid_vwap, force_overlay=true)
 
 candleColorToUse = master_show_pvsr and show_pvsr_candles ? pvsraColor : na
-barcolor(candleColorToUse, force_overlay=true)
+// No force_overlay here: barcolor() does not accept it, and does not need it.
+// Unlike plot(), barcolor() always paints the main chart's bars regardless of
+// which pane the indicator lives in.
+barcolor(candleColorToUse)
 
 plotshape(master_show_sma_cross and show_sma_cross_labels and golden_cross, title='SMA Golden Cross', style=shape.triangleup,
          location=location.belowbar, color=color.green, text='SMA GOLD', textcolor=color.rgb(255, 255, 255), size=size.small, force_overlay=true)
