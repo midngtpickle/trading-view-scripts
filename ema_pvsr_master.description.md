@@ -1,60 +1,101 @@
 # EMA & PVSR Master
 
-Combines two previously separate indicators, EMA & PVSR Indicators and PVSR Volume Panel, into one script. Moving averages and candle coloring stay on the price chart while volume gets its own pane below, and both read from the same PVSR (volume classification) calculation so the candle colors and the volume bars never fall out of sync.
+[![Pine Script v6](https://img.shields.io/badge/Pine_Script-v6-blue.svg)](https://www.tradingview.com/pine-script-docs/)
+[![Source Code](https://img.shields.io/badge/Source_Code-ema__pvsr__master.pine-purple.svg)](ema_pvsr_master.pine)
 
-## Moving averages
+Combines two previously separate indicators—**EMA & PVSR Indicators** and **PVSR Volume Panel**—into a single, cohesive script. Moving averages and candle coloring stay on the main price chart, while volume displays in its dedicated sub-pane below. Both subsystems read directly from the exact same PVSR (Price Volume Spread Analysis) calculation engine, guaranteeing that candle colors and volume bars never drift out of sync.
 
-- 6 EMAs (default lengths 10, 21, 50, 100, 200, 800), each with its own length, color, and on/off toggle
-- 3 SMAs (default lengths 50, 100, 200), same per-line controls
-- VWAP with adjustable color and line width
-- Golden Cross / Death Cross labels for both the SMA pair (default 50/200) and the EMA pair (default 9/21), plotted independently with their own fast/slow lengths
+---
 
-## PVSR volume classification
+## 📈 Moving Averages & Trend Tools
 
-Every bar is classified once, using volume relative to its recent average and the volume-to-range spread over a lookback period:
+- **6 Exponential Moving Averages (EMAs)**: Default lengths `10, 21, 50, 100, 200, 800`, each with independent toggle, length, color, and line width controls.
+- **3 Simple Moving Averages (SMAs)**: Default lengths `50, 100, 200`, with full per-line customization.
+- **Anchored VWAP**: Built-in volume-weighted average price with adjustable color and line styling.
+- **Crossover Detection & Visual Labels**:
+  - **SMA Golden / Death Cross**: Default `50 / 200` period detection.
+  - **EMA Golden / Death Cross**: Default `9 / 21` period detection.
+  - Independent toggles and customizable fast/slow lengths for both pairs.
 
-- Climax (green/red): volume at or above the climax multiplier, or the highest volume-spread bar in the lookback window
-- Above-average (blue/violet): volume at or above the above-average multiplier
-- Regular (light/dark gray): everything else, including bars where volume data isn't available
+---
 
-That classification drives the candle colors on the chart, the volume column colors in the indicator's pane, and an optional set of supply/demand zones (see below).
+## 📊 PVSR Volume Classification
 
-Two settings control how the comparison is measured:
+Every bar is evaluated once based on volume relative to its recent moving average and the volume-to-range spread over a lookback window:
 
-**Exclude current bar from lookback** (default on) measures the average volume and the volume-spread high over the previous N bars rather than a window containing the bar being tested. This matches the original PVSRA definition. With it off, a large bar sits inside its own comparison window, drags its own average up, and can fail the test it should pass. Turn it off to reproduce charts drawn before the option existed.
+| Classification | Candle / Bar Color | Trigger Condition |
+| :--- | :--- | :--- |
+| **Climax** | 🟢 Green / 🔴 Red | Volume $\ge$ Climax Multiplier, **OR** Highest Volume-Spread bar in lookback window |
+| **Above-Average** | 🔵 Blue / 🟣 Violet | Volume $\ge$ Above-Average Multiplier |
+| **Regular** | ⚪ Light Gray / 🔘 Dark Gray | Standard market volume / missing volume data |
 
-**Use volume × spread climax leg** (default on) controls the second half of the climax test. That leg fires whenever a bar sets a new lookback high in volume × range, which happens roughly once every N bars regardless of market conditions, so it triggers far more often than the volume test does. Switching it off shows classification driven by volume alone, which is worth doing once to see how many of your climax candles came from which leg.
+This single classification drives:
+1. **Candle Body & Wick Colors** on the price chart.
+2. **Volume Column Colors** in the sub-pane.
+3. **Dynamic Vector Supply / Demand Zones** (optional).
 
-## Volume pane
+### Key Calculation Controls
 
-Below the price chart, the indicator's own pane shows volume columns colored by PVSR classification, a volume moving average, and threshold lines marking the above-average and climax levels, so you can see at a glance how a bar's volume compares to its recent history.
+- **Exclude current bar from lookback** *(Default: ON)*: Measures average volume and volume-spread highs over the previous $N$ bars (excluding the bar being tested). This matches the canonical PVSRA specification. When disabled, a massive volume bar sits inside its own comparison window and elevates the threshold.
+- **Use volume × spread climax leg** *(Default: ON)*: Controls the spread-multiplied climax test. Fires when a bar marks a new lookback high in `Volume × (High - Low)`. Disabling this lets you inspect classifications driven strictly by pure volume multiples.
 
-## Vector zones (optional)
+---
 
-Climax and above-average candles can draw a box around their range: bullish vectors create demand zones below price, bearish vectors create supply zones above. Zones extend right until price closes through them (or a wick pierces them, depending on your mitigation setting) and are capped per side so old zones roll off automatically.
+## 📉 Dedicated Volume Sub-Pane
 
-## Settings
+Below the main price chart, the indicator's pane provides:
+- **PVSR-Colored Volume Columns**: Direct visual correspondence to price action.
+- **Volume Moving Average Line**: Dynamic baseline for volume activity.
+- **Threshold Lines**: Visually marks Above-Average and Climax threshold levels against recent historical averages.
 
-Master toggles at the top turn each subsystem on or off (EMAs, EMA cross labels, SMAs, SMA cross labels, VWAP, PVSR candles, volume panel, vector zones) without touching the individual settings underneath. Each moving average, the PVSR thresholds, the vector zone appearance, and the volume panel colors all have their own input groups.
+---
 
-## Alerts
+## 📦 Dynamic Vector Zones (Supply & Demand)
 
-EMA Golden/Death Cross, SMA Golden/Death Cross, price crossing VWAP, and bullish or bearish vector candle (climax or above-average volume).
+Climax and Above-Average vector candles can automatically project supply and demand order-flow zones:
+- **Bullish Vector Candles**: Project **Demand Zones** below price.
+- **Bearish Vector Candles**: Project **Supply Zones** above price.
+- **Mitigation Handling**: Zones extend rightward until mitigated by price (configurable: mitigation on *bar close* vs. *wick touch*).
+- **Auto-Pruning**: Maximum active zones per side are capped to maintain clean charts and stay well within TradingView object limits.
 
-## Notes
+---
 
-The indicator is declared with `overlay=false` so the volume pane can exist, but every price-chart plot is tagged to force itself onto the main chart. If you don't see EMAs, SMAs, or candle coloring, check that the relevant master toggle is on.
+## ⚙️ Settings & Organization
 
-If the volume columns don't appear after adding the indicator, it has probably landed on the price chart rather than its own pane. Volume sits in the thousands while price sits far higher, so the columns render as an invisible sliver at the bottom of the price scale. Right-click the indicator name and choose Move to, then New pane below.
+Master toggles allow enabling or disabling entire subsystems with one click without resetting underlying configurations:
+- **Master Toggles**: EMAs, EMA Cross Labels, SMAs, SMA Cross Labels, VWAP, PVSR Candles, Volume Panel, Vector Zones.
+- **Customizable Thresholds**: Fine-tune volume lookback length, above-average multiplier, and climax multiplier.
+- **Appearance**: Per-element colors, opacities, and line widths.
 
-## Changelog
+---
 
-**v3 (2 August 2026)**
+## 🔔 Alerts
 
-- Added **Exclude current bar from lookback** (default on). The average volume and volume-spread high are now measured over the previous N bars, matching the original PVSRA definition. Previously the bar being tested sat inside its own comparison window. Expect slightly different candle colouring; turn the option off to restore the old behaviour.
-- Added **Use volume × spread climax leg** (default on, unchanged behaviour). The two halves of the climax test can now be toggled and read independently.
-- Fixed a compile error: `barcolor()` was being passed `force_overlay`, which it does not accept. It never needed it, because `barcolor()` always paints the main chart's bars whichever pane the indicator lives in.
+Configured for standard TradingView alert integration:
+- **EMA Golden Cross / Death Cross**
+- **SMA Golden Cross / Death Cross**
+- **Price Crossing VWAP**
+- **Bullish / Bearish Vector Candle** (Triggered on Climax or Above-Average volume)
 
-**v2**
+---
 
-- Merged EMA & PVSR Indicators and PVSR Volume Panel into one script. PVSR classification is computed once and feeds both the candle colours and the volume bars, so the two can no longer drift apart.
+## 💡 Notes & Troubleshooting
+
+> [!NOTE]
+> **Pane Setup & `force_overlay`**:
+> The indicator is declared with `overlay=false` so the volume pane can render beneath price, but price plots (EMAs, SMAs, VWAP, candle coloring) use `force_overlay=true` to project onto the main price chart.
+
+> [!TIP]
+> **If Volume Bars Appear Compressed on the Main Chart**:
+> If the indicator is added directly to the main chart, volume numbers (e.g. thousands/millions) and price numbers will share one scale, compressing the volume bars. Right-click the indicator name in your chart legend $\rightarrow$ **Move to** $\rightarrow$ **New pane below**.
+
+---
+
+## 📝 Changelog
+
+- **v3 (2 August 2026)**
+  - Added **Exclude current bar from lookback** (default: on). Average volume and volume-spread highs are measured over prior $N$ bars matching authentic PVSRA rules.
+  - Added **Use volume × spread climax leg** toggle (default: on).
+  - Fixed compile warning: removed invalid `force_overlay` parameter from `barcolor()`.
+- **v2**
+  - Unified EMA & PVSR Indicators with PVSR Volume Panel into a single script to ensure synchronized state and prevent calculation drift.

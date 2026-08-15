@@ -1,54 +1,86 @@
-# Pivots + Key Levels
+# Pivots + Key Levels Master
 
-Merges two indicators into one: a pivot point system (Fibonacci or Camarilla, R1 through R5 and S1 through S5) and a key levels system (Monday range, daily/weekly/monthly/yearly highs, lows, midpoints, and opens). Both draw on the same chart and share the same 500-line / 500-label object budget that TradingView imposes on a single indicator.
+[![Pine Script v6](https://img.shields.io/badge/Pine_Script-v6-blue.svg)](https://www.tradingview.com/pine-script-docs/)
+[![Source Code](https://img.shields.io/badge/Source_Code-pivots__and__key__levels__master__.pine-purple.svg)](pivots_and_key_levels_master_.pine)
 
-## Pivot points
+Unifies a multi-timeframe pivot point calculation engine (**Fibonacci** and **Camarilla**) with an automated higher-timeframe (HTF) key level framework (**Monday Range**, **Daily**, **Weekly**, **Monthly**, **Yearly**). Designed to provide comprehensive market structure context on a single chart while actively managing TradingView's 500-line / 500-label drawing object limits.
 
-- Choice of calculation method: Fibonacci or Camarilla
-- Timeframe options: Auto, Hourly, Daily, Weekly, Monthly, Quarterly, Yearly, Biyearly, Triyearly, Quinquennial
-- Lookback period controls how many past pivot segments stay drawn on the chart
-- Optional "use daily-based values" so intraday charts still calculate pivots from daily OHLC
-- Each level (P, R1/S1 through R5/S5) can be shown or hidden and has its own color
-- Labels can sit on the left or right edge of each pivot segment
-- Alerts for every level, either on close crossing the level or on the bar range simply touching it
+---
 
-A large lookback combined with every level enabled can approach the 500-object cap on its own; if levels stop drawing, that's usually why.
+## 🎯 Pivot Points System
 
-### Level naming
+- **Calculation Methods**:
+  - **Fibonacci Pivots** (Classic ratios)
+  - **Camarilla Pivots** (Custom institutional variant)
+- **Timeframe Resolution**: Auto, Hourly, Daily, Weekly, Monthly, Quarterly, Yearly, Biyearly, Triyearly, Quinquennial.
+- **Intraday Daily OHLC Basis**: Optional toggle to anchor pivot calculations to Daily OHLC data when viewing lower intraday timeframes.
+- **Historical Lookback**: Adjustable history depth to keep drawing objects within the platform cap.
+- **Visuals & Labels**: Toggle individual levels (P, R1–R5, S1–S5), customize line styles/colors, and position labels on the left or right edge of pivot segments.
+- **Integrated Level Alerts**: Trigger alerts when price closes across any pivot level or on intra-bar touch.
 
-The Camarilla calculation here is a deliberate custom variant, not the textbook equation, and the internal values are mapped onto the plotted lines with a one-step shift. H1 and L1 are not plotted:
+### Camarilla Level Shift & Architecture
 
-| plotted as | R1 | R2 | R3 | R4 | R5 |
-|---|---|---|---|---|---|
-| comes from | H2 | H3 | H4 | H5 | H6 |
+The Camarilla calculation in this script uses a deliberate custom institutional mapping where levels are shifted by one step compared to textbook equations (H1 and L1 are omitted):
 
-Worth knowing if you cross-reference other material. This script's R3 carries the H4 value, which published Camarilla writing treats as the breakout level, so it is not the "far extreme, rarely reached" that R3 means in standard pivot notation. TradingView's built-in Pivot Points Standard set to Camarilla plots five levels and puts (previous high / previous low) × previous close at its R5; that same value sits at this script's R5, but nothing in between lines up, so the two are not directly comparable.
+| Plotted Line | Calculation Source | Interpretation |
+| :--- | :--- | :--- |
+| **R1 / S1** | $H_2 / L_2$ | Inner range support / resistance |
+| **R2 / S2** | $H_3 / L_3$ | Mean reversion reversal boundaries |
+| **R3 / S3** | $H_4 / L_4$ | **Breakout / Trend acceleration boundary** *(Note: not an extreme)* |
+| **R4 / S4** | $H_5 / L_5$ | Strong momentum extension |
+| **R5 / S5** | $H_6 / L_6$ | Macro extreme target $(High / Low) \times Close$ |
 
-## Key levels
+> [!NOTE]
+> **Camarilla Notation Context**:
+> Because $H_4$ maps to **R3**, R3 functions as the primary range-breakout trigger rather than a rare outlier extreme. This intentionally differs from TradingView's standard built-in Camarilla indicator.
 
-- Monday range: high, low, and open, tracked live as Monday's session develops and reset each new week
-- Daily: today's open, previous day's high/low, previous day's midpoint
-- Weekly: current week's high/low/midpoint (live), previous week's high/low/midpoint
-- Monthly: current month's high/low/midpoint (live), previous month's high/low/midpoint
-- Yearly: current year's high/low/midpoint/open (live), previous year's high/low/midpoint
+---
 
-"Current period" levels update as the period develops. "Previous period" levels are locked in from the prior, completed period.
+## 📏 Higher-Timeframe (HTF) Key Levels
 
-Levels that land within a configurable tick tolerance of each other get merged onto a single line, with their labels combined (for example "PDH | CW High") instead of drawing overlapping lines on top of each other. Line length, merge tolerance, and per-group color/style/width are all adjustable, and master overrides let you force one color, one line style, or one width across every key level at once.
+Automatically draws and tracks critical market reference levels across five key time horizons:
 
-## Notes
+- **Monday Range**: Live Monday High, Low, and Midpoint (resets each new trading week).
+- **Daily**: Today's Open, Previous Day High (PDH), Previous Day Low (PDL), Previous Day Midpoint (pMid).
+- **Weekly**: Current Week High/Low/Midpoint (live developing), Previous Week High (PWH), Previous Week Low (PWL), Previous Week Midpoint.
+- **Monthly**: Current Month High/Low/Midpoint (live developing), Previous Month High (PMH), Previous Month Low (PML), Previous Month Midpoint.
+- **Yearly**: Current Year Open/High/Low/Midpoint (live developing), Previous Year High (PYH), Previous Year Low (PYL), Previous Year Midpoint.
 
-Pivot and key-level drawings redraw on the last bar rather than persisting historical objects bar by bar, which keeps the chart responsive even with several years of history loaded. Camarilla level math is left as originally sourced.
+---
 
-Because the key levels draw only on the last bar, the current week, month, and year lines show the developing period correctly on a live chart. In bar replay they will show the previous period's extreme instead, since replay makes a historical bar the last bar. Don't reuse those values in an alert or port them into a strategy without rebuilding them, for the same reason.
+## 🔀 Smart Level Merging (De-Cluttering)
 
-## Changelog
+When multiple higher-timeframe levels cluster near the same price within a user-defined tick tolerance, the indicator **automatically merges them onto a single line**:
 
-**v2 (2 August 2026)**
+- Instead of 3 overlapping lines obscuring the chart, a single line is rendered.
+- Labels are concatenated cleanly (e.g., `PDH | CW High | Mon High`).
+- Eliminates visual noise around confluence zones.
 
-- Documented the R1 to R5 level mapping in the code and in tooltips on the R3, R4, and R5 toggles. No calculation changed. The mapping shifts by one step against published Camarilla notation, and R3 in particular carries the breakout level rather than a far extreme, which is easy to misread.
-- Documented why the current-period week, month, and year levels use `request.security` with `lookahead_off` and no offset, what that means in bar replay, and why rebuilding them natively would break the monthly and yearly levels on intraday charts.
+---
 
-**v1**
+## ⚙️ Customization & Global Overrides
 
-- Merged Pivot Enhanced and Key Levels into one script sharing the 500-line and 500-label object budget.
+- **Global Style Overrides**: Force uniform color, line style (Solid, Dashed, Dotted), or line width across all key levels simultaneously with master override toggles.
+- **Per-Group Customization**: Individually configure colors and visibility for Monday, Daily, Weekly, Monthly, and Yearly sets when master overrides are disabled.
+
+---
+
+## 💡 Notes & Technical Context
+
+> [!IMPORTANT]
+> **TradingView 500-Object Cap Management**:
+> Pivot segments and key level lines redraw on the current bar rather than writing historical drawing objects bar-by-bar. This maintains high responsiveness and avoids hitting TradingView's platform ceiling of 500 lines and 500 labels.
+
+> [!TIP]
+> **Bar Replay Behavior**:
+> Current developing periods (Current Week, Month, Year) compute using `request.security` with `lookahead_off` and no offset. On live charts, they track the developing candle in real time. In historical Bar Replay, developing levels reflect the latest historical bar reached by the replay playhead.
+
+---
+
+## 📝 Changelog
+
+- **v2 (2 August 2026)**
+  - Fully documented the $R_1 \dots R_5$ Camarilla level mapping shift in code comments and UI tooltips on R3, R4, and R5 toggles.
+  - Documented `request.security` behavior and Bar Replay characteristics for current developing HTF levels.
+- **v1**
+  - Combined Pivot Enhanced and Key Levels into a unified script sharing the 500-line and 500-label object budget.
