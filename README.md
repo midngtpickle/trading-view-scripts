@@ -1,18 +1,19 @@
-# TradingView Pine Script Indicators (v6)
+# TradingView Pine Script Indicators & Strategies (v6)
 
 [![Pine Script v6](https://img.shields.io/badge/Pine_Script-v6-blue.svg)](https://www.tradingview.com/pine-script-docs/)
 [![License: MPL 2.0](https://img.shields.io/badge/License-MPL_2.0-brightgreen.svg)](https://opensource.org/licenses/MPL-2.0)
 [![TradingView](https://img.shields.io/badge/TradingView-Compatible-0084ff.svg)](https://www.tradingview.com/)
 
-A curated collection of modular, production-ready Pine Script v6 indicators for TradingView. Designed for active traders, swing traders, and technical analysts seeking clean charts, synchronized volume-spread classification, and automated multi-timeframe key levels without cluttering the screen.
+A curated collection of modular, production-ready Pine Script v6 indicators and strategies for TradingView. Designed for active traders, swing traders, and technical analysts seeking clean charts, synchronized volume-spread classification, automated multi-timeframe key levels, and regime-hedged scalping strategies without cluttering the screen.
 
 ---
 
 ## 📑 Table of Contents
 
-- [Featured Indicators](#-featured-indicators)
+- [Featured Indicators & Strategies](#-featured-indicators--strategies)
   - [1. EMA & PVSR Master](#1-ema--pvsr-master)
   - [2. Pivots + Key Levels Master](#2-pivots--key-levels-master)
+  - [3. BTC 5M & 15M Scalping Strategy Pair](#3-btc-5m--15m-scalping-strategy-pair)
 - [Installation Guide](#-installation-guide)
 - [TradingView Limits & Best Practices](#-tradingview-limits--best-practices)
 - [Repository Structure](#-repository-structure)
@@ -20,7 +21,7 @@ A curated collection of modular, production-ready Pine Script v6 indicators for 
 
 ---
 
-## 🚀 Featured Indicators
+## 🚀 Featured Indicators & Strategies
 
 ### 1. [EMA & PVSR Master](ema_pvsr_master.pine)
 > **Combines multi-period moving averages, VWAP, and synchronized PVSRA volume classification into a single unified script.**
@@ -57,16 +58,37 @@ A curated collection of modular, production-ready Pine Script v6 indicators for 
 
 ---
 
+### 3. [BTC 5M & 15M Scalping Strategy Pair](BTC%205M%20&%2015M%20Strategies/STRATEGY_GUIDE.md)
+> **A regime-hedged pair of Pine Script v6 strategies engineered for 5m and 15m Bitcoin trading, complete with built-in R-multiple performance analytics tables.**
+
+- **[Camarilla Range Bounce Scalper](BTC%205M%20&%2015M%20Strategies/camarilla_range_bounce_1.pine)**:
+  - **Mean-Reversion Thesis**: Fades touches of Camarilla S3 (long) and R3 (short) during low-volatility/ranging market conditions, targeting the central pivot (PP) and opposite boundaries with stops beyond S4/R4.
+  - **Regime Filters**: ADX max threshold (< 22), price containment within S3/R3 over lookback window, optional BB width percentile filter, and RSI extreme confirmation.
+  - **Scale-Out Mechanics**: Takes 50% TP1 at central pivot (PP), moves stop to breakeven, and lets TP2 run to opposite R3/S3 level.
+
+- **[EMA 9/21 Pullback Continuation](BTC%205M%20&%2015M%20Strategies/ema_pullback_continuation.pine)**:
+  - **Trend-Following Thesis**: Captures pullback continuation in strong trends using a 3-state machine (**ARM** on EMA touch, **FIRE** on resumption close, **DISARM** on 21 EMA breach or bar expiry) with clear on-chart state shading.
+  - **Regime Filters**: High ADX requirement (> 22), 9/21 EMA separation spacing, and higher-timeframe EMA direction alignment (1H for 5m chart / 4H for 15m chart).
+  - **Runner Exits**: Features customizable Chandelier trailing stops, slow EMA trails, or fixed R-multiple targets to preserve multi-R trend outliers.
+
+- **Honest R-Multiple Analytics**: Both strategies feature dynamic on-chart performance tables tracking net R-multiples, win rates, and trade distributions sliced by ADX regime, UTC trading session (Asia/London/NY), and direction.
+
+📖 **Detailed Strategy & Calibration Guide**: [STRATEGY_GUIDE.md](BTC%205M%20&%2015M%20Strategies/STRATEGY_GUIDE.md)
+
+---
+
 ## 🛠 Installation Guide
 
-Follow these steps to add any indicator from this repository to your TradingView chart:
+Follow these steps to add any indicator or strategy from this repository to your TradingView chart:
 
 1. Open **[TradingView](https://www.tradingview.com/)** and navigate to your chart.
 2. At the bottom of the screen, open the **Pine Editor** tab.
-3. Click **Open** -> **New Indicator** (or clear the editor).
+3. Click **Open** -> **New Indicator** (or **New Strategy** for strategy scripts).
 4. Copy the entire raw code from the desired `.pine` file:
    - [ema_pvsr_master.pine](ema_pvsr_master.pine)
    - [pivots_and_key_levels_master_.pine](pivots_and_key_levels_master_.pine)
+   - [camarilla_range_bounce_1.pine](BTC%205M%20&%2015M%20Strategies/camarilla_range_bounce_1.pine)
+   - [ema_pullback_continuation.pine](BTC%205M%20&%2015M%20Strategies/ema_pullback_continuation.pine)
 5. Paste the code into the Pine Editor.
 6. Click **Save** and give the script a name.
 7. Click **Add to Chart**.
@@ -97,7 +119,11 @@ Follow these steps to add any indicator from this repository to your TradingView
 ├── ema_pvsr_master.pine                       # EMA & PVSR Master indicator source code
 ├── ema_pvsr_master.description.md             # Complete documentation for EMA & PVSR Master
 ├── pivots_and_key_levels_master_.pine         # Pivots + Key Levels Master source code
-└── pivots_and_key_levels_master.description.md # Complete documentation for Pivots + Key Levels
+├── pivots_and_key_levels_master.description.md # Complete documentation for Pivots + Key Levels
+└── BTC 5M & 15M Strategies/                   # BTC 5m & 15m scalping strategies directory
+    ├── STRATEGY_GUIDE.md                      # Setup, calibration, and backtesting guide
+    ├── camarilla_range_bounce_1.pine          # Camarilla Range Bounce mean-reversion strategy
+    └── ema_pullback_continuation.pine         # EMA 9/21 Pullback Continuation trend strategy
 ```
 
 ---
@@ -109,3 +135,4 @@ This project is licensed under the [Mozilla Public License 2.0 (MPL-2.0)](LICENS
 
 ### Disclaimer
 *These scripts are provided for educational and informational purposes only. Nothing contained herein constitutes investment, financial, or trading advice. Trading financial markets involves substantial risk of loss. Always conduct your own research and risk management before executing trades.*
+

@@ -1,0 +1,421 @@
+//@version=6
+// ============================================================================
+// 🌙🥒 EMA 9/21 Pullback Continuation — A Midnight Pickle Production
+// ----------------------------------------------------------------------------
+// Concept: Trend-following, NOT mean reversion. Waits for an established
+// 9/21 EMA trend, lets price pull back INTO the EMA zone, then enters on the
+// resumption candle. Longs in uptrends, shorts in downtrends — symmetric.
+//
+// This is the structural opposite of the Camarilla Range Bounce strategy:
+// that one wants ADX LOW, this one wants ADX HIGH. Running both on the same
+// symbol is a rough regime hedge, but do NOT judge them on the same window —
+// each will look broken during the other's best conditions.
+//
+// Designed for 5m / 15m BTC.
+// ============================================================================
+
+strategy("🌙🥒 EMA 9/21 Pullback Continuation",
+     shorttitle       = "🌙🥒 EMA Pullback",
+     overlay          = true,
+     initial_capital  = 10000,
+     default_qty_type = strategy.percent_of_equity,
+     default_qty_value= 10,
+     commission_type  = strategy.commission.percent,
+     commission_value = 0.045,      // adjust to YOUR fee tier
+     slippage         = 2,          // ticks — leave this non-zero
+     pyramiding       = 0,
+     calc_on_every_tick = false,
+     process_orders_on_close = true)
+
+// ============================================================================
+// INPUTS
+// ============================================================================
+grpEma = "── EMAs ──"
+fastLen     = input.int(9,          "Fast EMA",               minval=2, group=grpEma)
+slowLen     = input.int(21,         "Slow EMA",               minval=3, group=grpEma)
+slopeLen    = input.int(3,          "Slope lookback",         minval=1, group=grpEma, tooltip="Slow EMA must be rising/falling over this many bars.")
+useHtf      = input.bool(true,      "Higher timeframe filter", group=grpEma)
+htf         = input.timeframe("60", "HTF",                    group=grpEma, tooltip="Use 60 for a 5m chart, 240 for 15m.")
+htfEmaLen   = input.int(50,         "HTF EMA length",         minval=5, group=grpEma)
+
+grpReg = "── Regime Filter (keeps you out of chop) ──"
+useAdx      = input.bool(true,      "Require trending ADX",   group=grpReg)
+adxLen      = input.int(14,         "ADX length",             minval=2, group=grpReg)
+adxMin      = input.float(22.0,     "Min ADX",                minval=5, maxval=60, step=0.5, group=grpReg, tooltip="Below this, market is ranging — no trades. Note this is the MIRROR of the range strategy.")
+useSepar    = input.bool(true,      "Require EMA separation", group=grpReg)
+separAtr    = input.float(0.15,     "Min 9/21 gap (ATR)",     minval=0.0, step=0.05, group=grpReg, tooltip="Rejects entries when the EMAs are tangled together.")
+
+grpEnt = "── Pullback / Entry ──"
+touchAtr    = input.float(0.20,     "Touch tolerance (ATR)",  minval=0.0, step=0.05, group=grpEnt, tooltip="How close to the fast EMA counts as a pullback touch.")
+deepStop    = input.float(0.35,     "Max pullback depth past slow EMA (ATR)", minval=0.0, step=0.05, group=grpEnt, tooltip="Closing beyond this disarms the setup — the pullback became a reversal.")
+armExpiry   = input.int(12,         "Pullback expiry (bars)", minval=2, group=grpEnt, tooltip="If price doesn't resume within N bars of touching, cancel the setup.")
+needEngulf  = input.bool(false,     "Require close > prior high (long)", group=grpEnt, tooltip="Stricter trigger. Fewer trades, better entries, more missed moves.")
+allowLong   = input.bool(true,      "Allow longs (bull)",     group=grpEnt)
+allowShort  = input.bool(true,      "Allow shorts (bear)",    group=grpEnt)
+
+grpExit = "── Exits ──"
+atrLen      = input.int(14,         "ATR length",             minval=2, group=grpExit)
+stopMode    = input.string("Swing", "Stop placement",         options=["Swing","ATR"], group=grpExit, tooltip="Swing = beyond the pullback extreme. Usually tighter and more logical.")
+atrStopMult = input.float(1.5,      "ATR stop multiplier",    minval=0.2, step=0.1, group=grpExit)
+stopBuffer  = input.float(0.15,     "Swing stop buffer (ATR)", minval=0.0, step=0.05, group=grpExit)
+tp1R        = input.float(1.0,      "TP1 at R multiple",      minval=0.2, step=0.1, group=grpExit)
+tp1Pct      = input.int(50,         "TP1 size %",             minval=0, maxval=100, group=grpExit)
+trailMode   = input.string("Chandelier", "Runner exit",       options=["Fixed R","Chandelier","Slow EMA"], group=grpExit, tooltip="Trend strategies live or die on letting runners run. Fixed R caps your best trades.")
+tp2R        = input.float(2.5,      "TP2 at R multiple (Fixed R)", minval=0.5, step=0.1, group=grpExit)
+trailLen    = input.int(10,         "Chandelier lookback",    minval=2, group=grpExit)
+trailMult   = input.float(2.0,      "Chandelier ATR mult",    minval=0.5, step=0.1, group=grpExit)
+moveBe      = input.bool(true,      "Move stop to BE after TP1", group=grpExit)
+maxBars     = input.int(0,          "Time stop (bars, 0=off)", minval=0, group=grpExit)
+
+grpRisk = "── Risk / Session ──"
+maxPerDay   = input.int(5,          "Max entries per day",    minval=1, group=grpRisk)
+useSess     = input.bool(false,     "Restrict to session",    group=grpRisk)
+sess        = input.session("0700-1600", "Session",           group=grpRisk)
+sessTz      = input.string("Europe/London", "Timezone",       group=grpRisk)
+
+grpTbl = "── Stats Table ──"
+showTable   = input.bool(true,      "Show stats table",       group=grpTbl)
+tblPos      = input.string("Top Right", "Position",           options=["Top Right","Top Left","Bottom Right","Bottom Left","Middle Right"], group=grpTbl)
+tblSize     = input.string("Small",  "Text size",             options=["Tiny","Small","Normal","Large"], group=grpTbl)
+
+// ============================================================================
+// INDICATORS
+// ============================================================================
+emaF = ta.ema(close, fastLen)
+emaS = ta.ema(close, slowLen)
+atr  = ta.atr(atrLen)
+[diP, diM, adx] = ta.dmi(adxLen, adxLen)
+
+// Non-repainting HTF: request the PREVIOUS completed HTF bar's EMA. The [1]
+// offset is what makes lookahead_on safe — without it you read unformed data.
+htfEma = useHtf ? request.security(syminfo.tickerid, htf,
+     ta.ema(close, htfEmaLen)[1], lookahead = barmerge.lookahead_on) : na
+
+// ============================================================================
+// REGIME / TREND STATE
+// ============================================================================
+slopeUp   = emaS > emaS[slopeLen]
+slopeDn   = emaS < emaS[slopeLen]
+separOk   = not useSepar or math.abs(emaF - emaS) >= atr * separAtr
+adxOk     = not useAdx or adx > adxMin
+inSession = not useSess or not na(time(timeframe.period, sess, sessTz))
+htfUpOk   = not useHtf or (not na(htfEma) and close > htfEma)
+htfDnOk   = not useHtf or (not na(htfEma) and close < htfEma)
+
+isNewDay = timeframe.change("D")
+var int tradesToday = 0
+if isNewDay
+    tradesToday := 0
+underLimit = tradesToday < maxPerDay
+
+baseOk   = adxOk and separOk and inSession and underLimit
+trendUp  = baseOk and emaF > emaS and slopeUp and htfUpOk
+trendDn  = baseOk and emaF < emaS and slopeDn and htfDnOk
+
+// ============================================================================
+// PULLBACK STATE MACHINE
+// ----------------------------------------------------------------------------
+// ARM   : price pulls back and touches the fast EMA while trend is intact
+// FIRE  : price resumes in the trend direction with a confirming close
+// DISARM: pullback goes too deep (becomes a reversal) or simply expires
+// ============================================================================
+var bool  armedL   = false
+var bool  armedS   = false
+var int   armBar   = na
+var float swingLo  = na
+var float swingHi  = na
+
+tol      = atr * touchAtr
+tooDeepL = close < emaS - atr * deepStop
+tooDeepS = close > emaS + atr * deepStop
+
+// --- Arm ---
+if trendUp and not armedL and low <= emaF + tol
+    armedL  := true
+    armBar  := bar_index
+    swingLo := low
+if trendDn and not armedS and high >= emaF - tol
+    armedS  := true
+    armBar  := bar_index
+    swingHi := high
+
+// --- Track the pullback extreme while armed ---
+if armedL
+    swingLo := math.min(nz(swingLo, low), low)
+if armedS
+    swingHi := math.max(nz(swingHi, high), high)
+
+// --- Disarm ---
+expired = not na(armBar) and (bar_index - armBar) > armExpiry
+if armedL and (tooDeepL or not trendUp or expired)
+    armedL := false
+if armedS and (tooDeepS or not trendDn or expired)
+    armedS := false
+
+// --- Fire ---
+trigL = close > emaF and close > open and (not needEngulf or close > high[1])
+trigS = close < emaF and close < open and (not needEngulf or close < low[1])
+
+flat = strategy.position_size == 0
+longSignal  = allowLong  and armedL and trendUp and trigL and flat
+shortSignal = allowShort and armedS and trendDn and trigS and flat
+
+// ============================================================================
+// EXECUTION
+// ============================================================================
+var float entryPx  = na
+var float stopPx   = na
+var float tp1Px    = na
+var float tp2Px    = na
+var float riskPts  = na
+var float trailPx  = na
+var int   entryBar = na
+var bool  tp1Done  = false
+
+var int   tagAdx   = na
+var int   tagSess  = na
+var int   tagDir   = na
+
+f_adxBucket(_a)  => _a < 20 ? 0 : _a < 30 ? 1 : 2
+f_sessBucket(_h) => _h < 7 ? 0 : _h < 13 ? 1 : _h < 21 ? 2 : 3
+
+if longSignal
+    entryPx := close
+    rawStop  = stopMode == "Swing" ? nz(swingLo, low) - atr * stopBuffer : close - atr * atrStopMult
+    stopPx  := math.min(rawStop, close - syminfo.mintick)
+    riskPts := entryPx - stopPx
+    tp1Px   := entryPx + riskPts * tp1R
+    tp2Px   := entryPx + riskPts * tp2R
+    trailPx := stopPx
+    entryBar:= bar_index
+    tp1Done := false
+    tagAdx  := f_adxBucket(adx)
+    tagSess := f_sessBucket(hour(time, "UTC"))
+    tagDir  := 0
+    tradesToday += 1
+    armedL  := false
+    strategy.entry("L", strategy.long)
+
+if shortSignal
+    entryPx := close
+    rawStop  = stopMode == "Swing" ? nz(swingHi, high) + atr * stopBuffer : close + atr * atrStopMult
+    stopPx  := math.max(rawStop, close + syminfo.mintick)
+    riskPts := stopPx - entryPx
+    tp1Px   := entryPx - riskPts * tp1R
+    tp2Px   := entryPx - riskPts * tp2R
+    trailPx := stopPx
+    entryBar:= bar_index
+    tp1Done := false
+    tagAdx  := f_adxBucket(adx)
+    tagSess := f_sessBucket(hour(time, "UTC"))
+    tagDir  := 1
+    tradesToday += 1
+    armedS  := false
+    strategy.entry("S", strategy.short)
+
+// Detect TP1 fill so the stop can be pulled to breakeven
+if strategy.position_size > 0 and not tp1Done and high >= tp1Px
+    tp1Done := true
+if strategy.position_size < 0 and not tp1Done and low <= tp1Px
+    tp1Done := true
+
+// --- Runner trailing ---
+if strategy.position_size > 0
+    cand = switch trailMode
+        "Chandelier" => ta.highest(high, trailLen) - atr * trailMult
+        "Slow EMA"   => emaS - atr * stopBuffer
+        => stopPx
+    trailPx := math.max(nz(trailPx, stopPx), cand)
+if strategy.position_size < 0
+    cand = switch trailMode
+        "Chandelier" => ta.lowest(low, trailLen) + atr * trailMult
+        "Slow EMA"   => emaS + atr * stopBuffer
+        => stopPx
+    trailPx := math.min(nz(trailPx, stopPx), cand)
+
+beStop = moveBe and tp1Done ? entryPx : stopPx
+effStopL = math.max(stopPx, trailPx, beStop)
+effStopS = math.min(stopPx, trailPx, beStop)
+
+useFixedTp = trailMode == "Fixed R"
+
+if strategy.position_size > 0
+    if tp1Pct > 0
+        strategy.exit("L-TP1", from_entry="L", qty_percent=tp1Pct, limit=tp1Px, stop=effStopL)
+    if useFixedTp
+        strategy.exit("L-TP2", from_entry="L", limit=tp2Px, stop=effStopL)
+    else
+        strategy.exit("L-RUN", from_entry="L", stop=effStopL)
+
+if strategy.position_size < 0
+    if tp1Pct > 0
+        strategy.exit("S-TP1", from_entry="S", qty_percent=tp1Pct, limit=tp1Px, stop=effStopS)
+    if useFixedTp
+        strategy.exit("S-TP2", from_entry="S", limit=tp2Px, stop=effStopS)
+    else
+        strategy.exit("S-RUN", from_entry="S", stop=effStopS)
+
+// Time stop
+if maxBars > 0 and strategy.position_size != 0 and not na(entryBar) and bar_index - entryBar >= maxBars
+    strategy.close_all(comment="Time stop")
+
+// Trend invalidation: the reason we entered has gone
+if strategy.position_size > 0 and emaF < emaS
+    strategy.close_all(comment="Trend flip")
+if strategy.position_size < 0 and emaF > emaS
+    strategy.close_all(comment="Trend flip")
+
+if strategy.position_size == 0
+    entryBar := na
+    trailPx  := na
+
+// ============================================================================
+// R-MULTIPLE ACCOUNTING
+// ----------------------------------------------------------------------------
+// Measured per POSITION, not per exit order. Pine counts every scale-out as
+// its own closed trade, which would double-count TP1 fills and inflate win
+// rate. We snapshot net profit at open and at flat, then divide by the INITIAL
+// cash risk (entry to original stop, before any breakeven or trail move).
+// ============================================================================
+var float posOpenNet = na
+var float posRiskCsh = na
+var bool  posActive  = false
+
+var int[]   regCnt = array.new_int(3, 0),  regWin = array.new_int(3, 0)
+var int[]   sesCnt = array.new_int(4, 0),  sesWin = array.new_int(4, 0)
+var int[]   dirCnt = array.new_int(2, 0),  dirWin = array.new_int(2, 0)
+var float[] regR   = array.new_float(3, 0.0)
+var float[] sesR   = array.new_float(4, 0.0)
+var float[] dirR   = array.new_float(2, 0.0)
+var float   maxR   = 0.0
+var int     dayCount = 0
+
+if isNewDay
+    dayCount += 1
+
+justOpened = strategy.position_size != 0 and not posActive
+justClosed = strategy.position_size == 0 and posActive
+
+if justOpened
+    posOpenNet := strategy.netprofit
+    posRiskCsh := math.abs(strategy.position_avg_price - stopPx) * math.abs(strategy.position_size)
+    posActive  := true
+
+if justClosed
+    pnl   = strategy.netprofit - posOpenNet
+    rMult = posRiskCsh > 0 ? pnl / posRiskCsh : 0.0
+    isWin = pnl > 0 ? 1 : 0
+    maxR := math.max(maxR, rMult)
+    if not na(tagAdx)
+        array.set(regCnt, tagAdx, array.get(regCnt, tagAdx) + 1)
+        array.set(regWin, tagAdx, array.get(regWin, tagAdx) + isWin)
+        array.set(regR,   tagAdx, array.get(regR,   tagAdx) + rMult)
+    if not na(tagSess)
+        array.set(sesCnt, tagSess, array.get(sesCnt, tagSess) + 1)
+        array.set(sesWin, tagSess, array.get(sesWin, tagSess) + isWin)
+        array.set(sesR,   tagSess, array.get(sesR,   tagSess) + rMult)
+    if not na(tagDir)
+        array.set(dirCnt, tagDir, array.get(dirCnt, tagDir) + 1)
+        array.set(dirWin, tagDir, array.get(dirWin, tagDir) + isWin)
+        array.set(dirR,   tagDir, array.get(dirR,   tagDir) + rMult)
+    posActive := false
+
+// ============================================================================
+// STATS TABLE
+// ============================================================================
+f_pos(_s) =>
+    switch _s
+        "Top Right"    => position.top_right
+        "Top Left"     => position.top_left
+        "Bottom Right" => position.bottom_right
+        "Bottom Left"  => position.bottom_left
+        => position.middle_right
+
+f_size(_s) =>
+    switch _s
+        "Tiny"   => size.tiny
+        "Small"  => size.small
+        "Normal" => size.normal
+        => size.large
+
+var table st = na
+
+f_hdr(_t, _r, _txt, _sz) =>
+    table.cell(_t, 0, _r, _txt, text_color=color.new(color.silver, 0), text_size=_sz,
+         text_halign=text.align_left, bgcolor=color.new(color.gray, 80))
+    for c = 1 to 4
+        table.cell(_t, c, _r, "", bgcolor=color.new(color.gray, 80))
+
+f_row(_t, _r, _label, _cnt, _wins, _sumR, _sz) =>
+    wr  = _cnt > 0 ? _wins / _cnt * 100.0 : 0.0
+    avg = _cnt > 0 ? _sumR / _cnt : 0.0
+    col = _cnt == 0 ? color.new(color.gray, 40) : avg > 0 ? color.teal : color.red
+    table.cell(_t, 0, _r, _label, text_color=color.new(color.white, 0), text_size=_sz, text_halign=text.align_left)
+    table.cell(_t, 1, _r, str.tostring(_cnt), text_color=color.new(color.white, 0), text_size=_sz)
+    table.cell(_t, 2, _r, _cnt > 0 ? str.tostring(wr, "#.0") + "%" : "–", text_color=color.new(color.white, 0), text_size=_sz)
+    table.cell(_t, 3, _r, _cnt > 0 ? str.tostring(avg, "#.00") + "R" : "–", text_color=col, text_size=_sz)
+    table.cell(_t, 4, _r, _cnt > 0 ? str.tostring(_sumR, "#.0") + "R" : "–", text_color=col, text_size=_sz)
+
+if showTable and barstate.islast
+    sz = f_size(tblSize)
+    if na(st)
+        st := table.new(f_pos(tblPos), 5, 17, border_width=1, border_color=color.new(color.gray, 60),
+             frame_width=1, frame_color=color.new(color.gray, 50), bgcolor=color.new(color.black, 15))
+    table.clear(st, 0, 0, 4, 16)
+
+    table.cell(st, 0, 0, "🌙🥒 Bucket", text_color=color.yellow, text_size=sz, text_halign=text.align_left)
+    table.cell(st, 1, 0, "N",     text_color=color.yellow, text_size=sz)
+    table.cell(st, 2, 0, "Win%",  text_color=color.yellow, text_size=sz)
+    table.cell(st, 3, 0, "Avg R", text_color=color.yellow, text_size=sz)
+    table.cell(st, 4, 0, "Net R", text_color=color.yellow, text_size=sz)
+
+    f_hdr(st, 1, "REGIME (ADX at entry)", sz)
+    f_row(st, 2, "  Weak    <20",   array.get(regCnt,0), array.get(regWin,0), array.get(regR,0), sz)
+    f_row(st, 3, "  Trending 20–30", array.get(regCnt,1), array.get(regWin,1), array.get(regR,1), sz)
+    f_row(st, 4, "  Strong   30+",  array.get(regCnt,2), array.get(regWin,2), array.get(regR,2), sz)
+
+    f_hdr(st, 5, "SESSION (UTC)", sz)
+    f_row(st, 6, "  Asia   00–07",  array.get(sesCnt,0), array.get(sesWin,0), array.get(sesR,0), sz)
+    f_row(st, 7, "  London 07–13",  array.get(sesCnt,1), array.get(sesWin,1), array.get(sesR,1), sz)
+    f_row(st, 8, "  NY     13–21",  array.get(sesCnt,2), array.get(sesWin,2), array.get(sesR,2), sz)
+    f_row(st, 9, "  Late   21–24",  array.get(sesCnt,3), array.get(sesWin,3), array.get(sesR,3), sz)
+
+    f_hdr(st, 10, "DIRECTION", sz)
+    f_row(st, 11, "  Long (bull pullback)", array.get(dirCnt,0), array.get(dirWin,0), array.get(dirR,0), sz)
+    f_row(st, 12, "  Short (bear rally)",   array.get(dirCnt,1), array.get(dirWin,1), array.get(dirR,1), sz)
+
+    totCnt = array.sum(dirCnt)
+    totWin = array.sum(dirWin)
+    totR   = array.sum(dirR)
+    f_hdr(st, 13, "TOTAL", sz)
+    f_row(st, 14, "  All trades", totCnt, totWin, totR, sz)
+
+    tpd = dayCount > 0 ? totCnt / dayCount : 0.0
+    table.cell(st, 0, 15, "  Trades/day", text_color=color.new(color.silver,0), text_size=sz, text_halign=text.align_left)
+    table.cell(st, 1, 15, str.tostring(tpd, "#.00"), text_color=color.new(color.silver,0), text_size=sz)
+    table.cell(st, 2, 15, "Days", text_color=color.new(color.silver,40), text_size=sz)
+    table.cell(st, 3, 15, str.tostring(dayCount), text_color=color.new(color.silver,0), text_size=sz)
+    table.cell(st, 4, 15, "", text_size=sz)
+
+    // Best single trade — trend strategies depend on outliers, so watch this
+    table.cell(st, 0, 16, "  Best trade", text_color=color.new(color.silver,0), text_size=sz, text_halign=text.align_left)
+    table.cell(st, 1, 16, "", text_size=sz)
+    table.cell(st, 2, 16, "", text_size=sz)
+    table.cell(st, 3, 16, str.tostring(maxR, "#.00") + "R", text_color=color.teal, text_size=sz)
+    table.cell(st, 4, 16, totR != 0 ? str.tostring(maxR / totR * 100.0, "#.0") + "% of net" : "–",
+         text_color=color.new(color.silver, 20), text_size=sz)
+
+// ============================================================================
+// PLOTS
+// ============================================================================
+pF = plot(emaF, "EMA Fast", color.new(color.aqua, 0), 2)
+pS = plot(emaS, "EMA Slow", color.new(color.orange, 0), 2)
+fill(pF, pS, color = emaF > emaS ? color.new(color.teal, 88) : color.new(color.red, 88))
+
+plot(useHtf ? htfEma : na, "HTF EMA", color.new(color.purple, 30), 2, plot.style_line)
+
+bgcolor(trendUp ? color.new(color.teal, 94) : trendDn ? color.new(color.red, 94) : na, title="Trend regime")
+bgcolor(armedL ? color.new(color.teal, 82) : armedS ? color.new(color.red, 82) : na, title="Pullback armed")
+
+plotshape(longSignal,  "Long",  shape.triangleup,   location.belowbar, color.teal, size=size.tiny)
+plotshape(shortSignal, "Short", shape.triangledown, location.abovebar, color.red,  size=size.tiny)

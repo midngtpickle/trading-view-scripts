@@ -1,0 +1,371 @@
+//@version=6
+// ============================================================================
+// 🌙🥒 Camarilla Range Bounce Scalper — A Midnight Pickle Production
+// ----------------------------------------------------------------------------
+// Concept: In SIDEWAYS/RANGING conditions, Camarilla R3/S3 act as reversion
+// boundaries rather than breakout triggers. This strategy fades touches of
+// S3 (long) and R3 (short), targets the central pivot, and stops out beyond
+// R4/S4 — the levels that traditionally signal "range is broken, trend is on".
+//
+// Designed for 5m / 15m BTC. Regime filters are ON by default because this
+// logic actively LOSES money in trending markets — that is expected, not a bug.
+// ============================================================================
+
+strategy("🌙🥒 Camarilla Range Bounce",
+     shorttitle       = "🌙🥒 RangeBounce",
+     overlay          = true,
+     initial_capital  = 10000,
+     default_qty_type = strategy.percent_of_equity,
+     default_qty_value= 10,
+     commission_type  = strategy.commission.percent,
+     commission_value = 0.045,      // taker-ish; adjust to YOUR fee tier
+     slippage         = 2,          // in ticks — do not set this to 0
+     pyramiding       = 0,
+     calc_on_every_tick = false,
+     process_orders_on_close = true)
+
+// ============================================================================
+// INPUTS
+// ============================================================================
+grpPiv = "── Pivots ──"
+pivotTF     = input.timeframe("D",  "Pivot timeframe",        group=grpPiv, tooltip="D for intraday scalping. Use 'W' if you want wider levels on 15m.")
+showLevels  = input.bool(true,      "Plot levels",            group=grpPiv)
+
+grpReg = "── Regime Filter (keeps you out of trends) ──"
+useAdx      = input.bool(true,      "Require low ADX",        group=grpReg)
+adxLen      = input.int(14,         "ADX length",             minval=2, group=grpReg)
+adxMax      = input.float(22.0,     "Max ADX",                minval=5, maxval=50, step=0.5, group=grpReg, tooltip="Above this, market is trending — no trades taken.")
+useContain  = input.bool(true,      "Require price contained in R3/S3", group=grpReg)
+containBars = input.int(20,         "Containment lookback",   minval=5, group=grpReg, tooltip="Price must not have closed outside R3/S3 in the last N bars.")
+useBbw      = input.bool(false,     "Require compressed BB width", group=grpReg)
+bbwLen      = input.int(20,         "BBW length",             minval=5, group=grpReg)
+bbwPct      = input.float(40.0,     "BBW percentile max",     minval=1, maxval=100, group=grpReg)
+
+grpEnt = "── Entry ──"
+touchAtr    = input.float(0.25,     "Touch tolerance (ATR)",  minval=0.0, step=0.05, group=grpEnt, tooltip="How close to the level counts as a touch. 0 = must pierce exactly.")
+needReject  = input.bool(true,      "Require rejection candle", group=grpEnt, tooltip="Wick through the level, close back inside.")
+useRsi      = input.bool(true,      "Require RSI extreme",    group=grpEnt)
+rsiLen      = input.int(14,         "RSI length",             minval=2, group=grpEnt)
+rsiLo       = input.float(35.0,     "RSI oversold (long)",    minval=1, maxval=50, group=grpEnt)
+rsiHi       = input.float(65.0,     "RSI overbought (short)", minval=50, maxval=99, group=grpEnt)
+allowLong   = input.bool(true,      "Allow longs",            group=grpEnt)
+allowShort  = input.bool(true,      "Allow shorts",           group=grpEnt)
+
+grpExit = "── Exits ──"
+stopMode    = input.string("S4/R4", "Stop placement",         options=["S4/R4", "ATR"], group=grpExit)
+atrLen      = input.int(14,         "ATR length",             minval=2, group=grpExit)
+atrStopMult = input.float(1.5,      "ATR stop multiplier",    minval=0.2, step=0.1, group=grpExit)
+tp1Pct      = input.int(50,         "TP1 size %",             minval=0, maxval=100, group=grpExit, tooltip="Portion closed at the central pivot. Remainder runs to TP2.")
+useTp2      = input.bool(true,      "Use TP2 (opposite R3/S3)", group=grpExit)
+moveBe      = input.bool(true,      "Move stop to BE after TP1", group=grpExit)
+maxBars     = input.int(0,          "Time stop (bars, 0=off)", minval=0, group=grpExit, tooltip="Scalps that stall are scalps that fail. Try 30-60 on 5m.")
+
+grpRisk = "── Risk / Session ──"
+maxPerDay   = input.int(4,          "Max entries per day",    minval=1, group=grpRisk)
+useSess     = input.bool(false,     "Restrict to session",    group=grpRisk)
+sess        = input.session("0700-1600", "Session",           group=grpRisk)
+sessTz      = input.string("Europe/London", "Timezone",       group=grpRisk)
+
+grpTbl = "── Stats Table ──"
+showTable   = input.bool(true,      "Show stats table",       group=grpTbl)
+tblPos      = input.string("Top Right", "Position",           options=["Top Right","Top Left","Bottom Right","Bottom Left","Middle Right"], group=grpTbl)
+tblSize     = input.string("Small",  "Text size",             options=["Tiny","Small","Normal","Large"], group=grpTbl)
+
+// ============================================================================
+// PIVOT CALCULATION  ◀── SWAP YOUR CUSTOM MATH IN HERE, NOTHING ELSE CHANGES
+// ============================================================================
+// Non-repainting pattern: request the PREVIOUS completed period's HLC using
+// lookahead_on. The [1] offset is what makes lookahead safe here — without it
+// you would be reading unformed data.
+[pH, pL, pC] = request.security(syminfo.tickerid, pivotTF,
+     [high[1], low[1], close[1]], lookahead = barmerge.lookahead_on)
+
+pRange = pH - pL
+
+PP = (pH + pL + pC) / 3.0
+R4 = pC + pRange * 1.1 / 2.0
+R3 = pC + pRange * 1.1 / 4.0
+R2 = pC + pRange * 1.1 / 6.0
+R1 = pC + pRange * 1.1 / 12.0
+S1 = pC - pRange * 1.1 / 12.0
+S2 = pC - pRange * 1.1 / 6.0
+S3 = pC - pRange * 1.1 / 4.0
+S4 = pC - pRange * 1.1 / 2.0
+// ============================================================================
+
+// ============================================================================
+// INDICATORS
+// ============================================================================
+atr = ta.atr(atrLen)
+rsi = ta.rsi(close, rsiLen)
+[diPlus, diMinus, adx] = ta.dmi(adxLen, adxLen)
+
+bbBasis = ta.sma(close, bbwLen)
+bbDev   = 2.0 * ta.stdev(close, bbwLen)
+bbw     = bbDev * 2.0 / bbBasis * 100.0
+bbwRank = ta.percentrank(bbw, 100)
+
+// ============================================================================
+// REGIME FILTER
+// ============================================================================
+// Containment: no CLOSE outside the R3/S3 envelope over the lookback window.
+brokeOut  = close > R3 or close < S3
+contained = not useContain or (ta.barssince(brokeOut) >= containBars)
+
+adxOk = not useAdx or adx < adxMax
+bbwOk = not useBbw or bbwRank < bbwPct
+
+inSession = not useSess or not na(time(timeframe.period, sess, sessTz))
+
+isNewDay = timeframe.change("D")
+var int tradesToday = 0
+if isNewDay
+    tradesToday := 0
+
+underLimit = tradesToday < maxPerDay
+levelsOk   = not na(PP) and pRange > 0
+regimeOk   = adxOk and contained and bbwOk and inSession and underLimit and levelsOk
+
+// ============================================================================
+// ENTRY CONDITIONS
+// ============================================================================
+tol = atr * touchAtr
+
+touchedS3 = low  <= S3 + tol
+touchedR3 = high >= R3 - tol
+
+rejectLong  = not needReject or (close > S3 and close > open)
+rejectShort = not needReject or (close < R3 and close < open)
+
+rsiOkLong   = not useRsi or rsi < rsiLo
+rsiOkShort  = not useRsi or rsi > rsiHi
+
+// Do not fade a level that has already failed on this bar
+notBrokenLo = close > S4
+notBrokenHi = close < R4
+
+longSignal  = allowLong  and regimeOk and touchedS3 and rejectLong  and rsiOkLong  and notBrokenLo
+shortSignal = allowShort and regimeOk and touchedR3 and rejectShort and rsiOkShort and notBrokenHi
+
+flat = strategy.position_size == 0
+
+// ============================================================================
+// EXECUTION
+// ============================================================================
+var float entryPx  = na
+var float stopPx   = na
+var float tp1Px    = na
+var float tp2Px    = na
+var int   entryBar = na
+var bool  tp1Done  = false
+
+// Bucket tags captured at the moment of entry
+var int   tagAdx   = na
+var int   tagSess  = na
+var int   tagDir   = na
+
+f_adxBucket(_a)  => _a < 15 ? 0 : _a < 20 ? 1 : 2
+f_sessBucket(_h) => _h < 7 ? 0 : _h < 13 ? 1 : _h < 21 ? 2 : 3
+
+if longSignal and flat
+    entryPx  := close
+    stopPx   := stopMode == "S4/R4" ? math.min(S4, low - syminfo.mintick) : close - atr * atrStopMult
+    tp1Px    := PP
+    tp2Px    := useTp2 ? R3 : PP
+    entryBar := bar_index
+    tp1Done  := false
+    tagAdx   := f_adxBucket(adx)
+    tagSess  := f_sessBucket(hour(time, "UTC"))
+    tagDir   := 0
+    tradesToday += 1
+    strategy.entry("L", strategy.long)
+
+if shortSignal and flat
+    entryPx  := close
+    stopPx   := stopMode == "S4/R4" ? math.max(R4, high + syminfo.mintick) : close + atr * atrStopMult
+    tp1Px    := PP
+    tp2Px    := useTp2 ? S3 : PP
+    entryBar := bar_index
+    tp1Done  := false
+    tagAdx   := f_adxBucket(adx)
+    tagSess  := f_sessBucket(hour(time, "UTC"))
+    tagDir   := 1
+    tradesToday += 1
+    strategy.entry("S", strategy.short)
+
+// Track TP1 fill so we can pull the stop to breakeven
+if strategy.position_size > 0 and not tp1Done and high >= tp1Px
+    tp1Done := true
+if strategy.position_size < 0 and not tp1Done and low <= tp1Px
+    tp1Done := true
+
+effStop = moveBe and tp1Done ? entryPx : stopPx
+
+if strategy.position_size > 0
+    if tp1Pct > 0
+        strategy.exit("L-TP1", from_entry="L", qty_percent=tp1Pct, limit=tp1Px, stop=effStop)
+    strategy.exit("L-TP2", from_entry="L", limit=tp2Px, stop=effStop)
+
+if strategy.position_size < 0
+    if tp1Pct > 0
+        strategy.exit("S-TP1", from_entry="S", qty_percent=tp1Pct, limit=tp1Px, stop=effStop)
+    strategy.exit("S-TP2", from_entry="S", limit=tp2Px, stop=effStop)
+
+// Time stop
+if maxBars > 0 and strategy.position_size != 0 and not na(entryBar)
+    if bar_index - entryBar >= maxBars
+        strategy.close_all(comment="Time stop")
+
+// Regime invalidation: if the range breaks while we are in it, get out
+if strategy.position_size > 0 and close < S4
+    strategy.close_all(comment="Range broken")
+if strategy.position_size < 0 and close > R4
+    strategy.close_all(comment="Range broken")
+
+if strategy.position_size == 0
+    entryBar := na
+
+// ============================================================================
+// R-MULTIPLE ACCOUNTING
+// ----------------------------------------------------------------------------
+// Measured per POSITION, not per exit order. Pine treats each scale-out as its
+// own "closed trade", which would double-count and distort win rate. Instead we
+// snapshot net profit when a position opens and again when it goes flat, then
+// divide by the INITIAL cash risk (entry to original stop, pre-breakeven).
+// ============================================================================
+var float posOpenNet = na
+var float posRiskCsh = na
+var bool  posActive  = false
+
+var int[] regCnt  = array.new_int(3, 0),  regWin  = array.new_int(3, 0)
+var int[] sesCnt  = array.new_int(4, 0),  sesWin  = array.new_int(4, 0)
+var int[] dirCnt  = array.new_int(2, 0),  dirWin  = array.new_int(2, 0)
+var float[] regR  = array.new_float(3, 0.0)
+var float[] sesR  = array.new_float(4, 0.0)
+var float[] dirR  = array.new_float(2, 0.0)
+var int   dayCount = 0
+
+if isNewDay
+    dayCount += 1
+
+justOpened = strategy.position_size != 0 and not posActive
+justClosed = strategy.position_size == 0 and posActive
+
+if justOpened
+    posOpenNet := strategy.netprofit
+    posRiskCsh := math.abs(strategy.position_avg_price - stopPx) * math.abs(strategy.position_size)
+    posActive  := true
+
+if justClosed
+    pnl = strategy.netprofit - posOpenNet
+    rMult = posRiskCsh > 0 ? pnl / posRiskCsh : 0.0
+    isWin = pnl > 0 ? 1 : 0
+    if not na(tagAdx)
+        array.set(regCnt, tagAdx, array.get(regCnt, tagAdx) + 1)
+        array.set(regWin, tagAdx, array.get(regWin, tagAdx) + isWin)
+        array.set(regR,   tagAdx, array.get(regR,   tagAdx) + rMult)
+    if not na(tagSess)
+        array.set(sesCnt, tagSess, array.get(sesCnt, tagSess) + 1)
+        array.set(sesWin, tagSess, array.get(sesWin, tagSess) + isWin)
+        array.set(sesR,   tagSess, array.get(sesR,   tagSess) + rMult)
+    if not na(tagDir)
+        array.set(dirCnt, tagDir, array.get(dirCnt, tagDir) + 1)
+        array.set(dirWin, tagDir, array.get(dirWin, tagDir) + isWin)
+        array.set(dirR,   tagDir, array.get(dirR,   tagDir) + rMult)
+    posActive := false
+
+// ============================================================================
+// STATS TABLE
+// ============================================================================
+f_pos(_s) =>
+    switch _s
+        "Top Right"     => position.top_right
+        "Top Left"      => position.top_left
+        "Bottom Right"  => position.bottom_right
+        "Bottom Left"   => position.bottom_left
+        => position.middle_right
+
+f_size(_s) =>
+    switch _s
+        "Tiny"   => size.tiny
+        "Small"  => size.small
+        "Normal" => size.normal
+        => size.large
+
+var table st = na
+
+f_hdr(_t, _r, _txt, _sz) =>
+    table.cell(_t, 0, _r, _txt, text_color=color.new(color.silver, 0), text_size=_sz,
+         text_halign=text.align_left, bgcolor=color.new(color.gray, 80))
+    for c = 1 to 4
+        table.cell(_t, c, _r, "", bgcolor=color.new(color.gray, 80))
+
+f_row(_t, _r, _label, _cnt, _wins, _sumR, _sz) =>
+    wr  = _cnt > 0 ? _wins / _cnt * 100.0 : 0.0
+    avg = _cnt > 0 ? _sumR / _cnt : 0.0
+    col = _cnt == 0 ? color.new(color.gray, 40) : avg > 0 ? color.teal : color.red
+    table.cell(_t, 0, _r, _label, text_color=color.new(color.white, 0), text_size=_sz, text_halign=text.align_left)
+    table.cell(_t, 1, _r, str.tostring(_cnt), text_color=color.new(color.white, 0), text_size=_sz)
+    table.cell(_t, 2, _r, _cnt > 0 ? str.tostring(wr, "#.0") + "%" : "–", text_color=color.new(color.white, 0), text_size=_sz)
+    table.cell(_t, 3, _r, _cnt > 0 ? str.tostring(avg, "#.00") + "R" : "–", text_color=col, text_size=_sz)
+    table.cell(_t, 4, _r, _cnt > 0 ? str.tostring(_sumR, "#.0") + "R" : "–", text_color=col, text_size=_sz)
+
+if showTable and barstate.islast
+    sz = f_size(tblSize)
+    if na(st)
+        st := table.new(f_pos(tblPos), 5, 16, border_width=1, border_color=color.new(color.gray, 60),
+             frame_width=1, frame_color=color.new(color.gray, 50), bgcolor=color.new(color.black, 15))
+    table.clear(st, 0, 0, 4, 15)
+
+    // Column headers
+    table.cell(st, 0, 0, "🌙🥒 Bucket", text_color=color.yellow, text_size=sz, text_halign=text.align_left)
+    table.cell(st, 1, 0, "N",     text_color=color.yellow, text_size=sz)
+    table.cell(st, 2, 0, "Win%",  text_color=color.yellow, text_size=sz)
+    table.cell(st, 3, 0, "Avg R", text_color=color.yellow, text_size=sz)
+    table.cell(st, 4, 0, "Net R", text_color=color.yellow, text_size=sz)
+
+    f_hdr(st, 1, "REGIME (ADX at entry)", sz)
+    f_row(st, 2, "  Dead flat  <15",  array.get(regCnt,0), array.get(regWin,0), array.get(regR,0), sz)
+    f_row(st, 3, "  Quiet   15–20",   array.get(regCnt,1), array.get(regWin,1), array.get(regR,1), sz)
+    f_row(st, 4, "  Waking   20+",    array.get(regCnt,2), array.get(regWin,2), array.get(regR,2), sz)
+
+    f_hdr(st, 5, "SESSION (UTC)", sz)
+    f_row(st, 6, "  Asia   00–07",    array.get(sesCnt,0), array.get(sesWin,0), array.get(sesR,0), sz)
+    f_row(st, 7, "  London 07–13",    array.get(sesCnt,1), array.get(sesWin,1), array.get(sesR,1), sz)
+    f_row(st, 8, "  NY     13–21",    array.get(sesCnt,2), array.get(sesWin,2), array.get(sesR,2), sz)
+    f_row(st, 9, "  Late   21–24",    array.get(sesCnt,3), array.get(sesWin,3), array.get(sesR,3), sz)
+
+    f_hdr(st, 10, "DIRECTION", sz)
+    f_row(st, 11, "  Long (S3 bounce)",  array.get(dirCnt,0), array.get(dirWin,0), array.get(dirR,0), sz)
+    f_row(st, 12, "  Short (R3 fade)",   array.get(dirCnt,1), array.get(dirWin,1), array.get(dirR,1), sz)
+
+    totCnt = array.sum(dirCnt)
+    totWin = array.sum(dirWin)
+    totR   = array.sum(dirR)
+    f_hdr(st, 13, "TOTAL", sz)
+    f_row(st, 14, "  All trades", totCnt, totWin, totR, sz)
+
+    tpd = dayCount > 0 ? totCnt / dayCount : 0.0
+    table.cell(st, 0, 15, "  Trades/day", text_color=color.new(color.silver,0), text_size=sz, text_halign=text.align_left)
+    table.cell(st, 1, 15, str.tostring(tpd, "#.00"), text_color=color.new(color.silver,0), text_size=sz)
+    table.cell(st, 2, 15, "Days", text_color=color.new(color.silver,40), text_size=sz)
+    table.cell(st, 3, 15, str.tostring(dayCount), text_color=color.new(color.silver,0), text_size=sz)
+    table.cell(st, 4, 15, "", text_size=sz)
+
+// ============================================================================
+// PLOTS
+// ============================================================================
+plot(showLevels ? R4 : na, "R4", color.new(color.red,    20), 1, plot.style_linebr)
+plot(showLevels ? R3 : na, "R3", color.new(color.red,     0), 2, plot.style_linebr)
+plot(showLevels ? R2 : na, "R2", color.new(color.red,    60), 1, plot.style_linebr)
+plot(showLevels ? R1 : na, "R1", color.new(color.red,    70), 1, plot.style_linebr)
+plot(showLevels ? PP : na, "PP", color.new(color.yellow,  0), 2, plot.style_linebr)
+plot(showLevels ? S1 : na, "S1", color.new(color.teal,   70), 1, plot.style_linebr)
+plot(showLevels ? S2 : na, "S2", color.new(color.teal,   60), 1, plot.style_linebr)
+plot(showLevels ? S3 : na, "S3", color.new(color.teal,    0), 2, plot.style_linebr)
+plot(showLevels ? S4 : na, "S4", color.new(color.teal,   20), 1, plot.style_linebr)
+
+bgcolor(regimeOk ? color.new(color.teal, 92) : na, title="Range regime active")
+
+plotshape(longSignal  and flat, "Long",  shape.triangleup,   location.belowbar, color.teal, size=size.tiny)
+plotshape(shortSignal and flat, "Short", shape.triangledown, location.abovebar, color.red,  size=size.tiny)
