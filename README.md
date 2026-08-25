@@ -4,6 +4,8 @@
 [![License: MPL 2.0](https://img.shields.io/badge/License-MPL_2.0-brightgreen.svg)](https://opensource.org/licenses/MPL-2.0)
 [![TradingView](https://img.shields.io/badge/TradingView-Compatible-0084ff.svg)](https://www.tradingview.com/)
 
+![TradingView Pine Script Suite](lead-image.png)
+
 A curated collection of modular, production-ready Pine Script v6 indicators and strategies for TradingView. Designed for active traders, swing traders, and technical analysts seeking clean charts, synchronized volume-spread classification, automated multi-timeframe key levels, and regime-hedged scalping strategies without cluttering the screen.
 
 ---
@@ -116,6 +118,7 @@ Follow these steps to add any indicator or strategy from this repository to your
 ├── README.md                                  # Repository overview and quick start guide
 ├── LICENSE                                    # Mozilla Public License 2.0
 ├── .gitignore                                 # Standard Git ignore configuration
+├── lead-image.png                             # Main repository header preview image
 ├── ema_pvsr_master.pine                       # EMA & PVSR Master indicator source code
 ├── ema_pvsr_master.description.md             # Complete documentation for EMA & PVSR Master
 ├── pivots_and_key_levels_master_.pine         # Pivots + Key Levels Master source code
