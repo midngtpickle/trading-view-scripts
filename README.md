@@ -16,6 +16,7 @@ A curated collection of modular, production-ready Pine Script v6 indicators and 
   - [1. EMA & PVSR Master](#1-ema--pvsr-master)
   - [2. Pivots + Key Levels Master](#2-pivots--key-levels-master)
   - [3. BTC 5M & 15M Scalping Strategy Pair](#3-btc-5m--15m-scalping-strategy-pair)
+  - [4. BTC Asia Range Sweep & Reclaim](#4-btc-asia-range-sweep--reclaim)
 - [Installation Guide](#-installation-guide)
 - [TradingView Limits & Best Practices](#-tradingview-limits--best-practices)
 - [Repository Structure](#-repository-structure)
@@ -79,6 +80,18 @@ A curated collection of modular, production-ready Pine Script v6 indicators and 
 
 ---
 
+### 4. [BTC Asia Range Sweep & Reclaim](btc_asia_sweep/)
+> **Liquidity sweep and mean-reversion strategy specifically designed for Bitcoin perpetual contracts during the post-US close / early Asian session.**
+
+- **[Asia Range Sweep & Reclaim v1](btc_asia_sweep/midnight_pickle_asia_sweep_v1.pine)**:
+  - **Core Thesis**: Exploits liquidity sweeps that occur in the thin-orderbook vacuum following the US cash close. Identifies the "Asia Box" (16:00–18:00 ET), detects false breakouts / stop sweeps during the "Power Window" (18:00–20:00 ET), and enters when price reclaims back inside the range.
+  - **Timezone-Safe Anchoring**: Built with America/New_York (US DST) and Asia/Tokyo anchoring to prevent DST seasonal drift.
+  - **Precision Filters**: Minimum/maximum ATR sweep penetration thresholds (0.15–1.50 ATR), integrated zero-lag divergence engine, Tokyo lunch filter (11:30–12:30 JST), and risk-bounded position sizing.
+  - 📖 **Detailed Strategy Guide**: [asia_sweep_strategy_guide.md](btc_asia_sweep/asia_sweep_strategy_guide.md)
+  - 📊 **Interactive Visual Playbook**: [btc_asia_sweep_playbook.html](btc_asia_sweep/btc_asia_sweep_playbook.html)
+
+---
+
 ## 🛠 Installation Guide
 
 Follow these steps to add any indicator or strategy from this repository to your TradingView chart:
@@ -91,6 +104,7 @@ Follow these steps to add any indicator or strategy from this repository to your
    - [pivots_and_key_levels_master_.pine](Master%20Suite%20Indicators/pivots_and_key_levels_master_.pine)
    - [camarilla_range_bounce.pine](Sculping%20Strategies/camarilla_range_bounce.pine)
    - [ema_pullback_continuation.pine](Sculping%20Strategies/ema_pullback_continuation.pine)
+   - [midnight_pickle_asia_sweep_v1.pine](btc_asia_sweep/midnight_pickle_asia_sweep_v1.pine)
 5. Paste the code into the Pine Editor.
 6. Click **Save** and give the script a name.
 7. Click **Add to Chart**.
@@ -124,11 +138,15 @@ Follow these steps to add any indicator or strategy from this repository to your
 │   ├── ema_pvsr_master.description.md         # Complete documentation for EMA & PVSR Master
 │   ├── pivots_and_key_levels_master_.pine     # Pivots + Key Levels Master source code
 │   └── pivots_and_key_levels_master.description.md # Complete documentation for Pivots + Key Levels
-└── Sculping Strategies/                       # BTC 5m & 15m scalping strategies directory
-    ├── camarilla_range_bounce.pine            # Camarilla Range Bounce mean-reversion strategy
-    ├── camarilla_range_bounce.description.md  # Camarilla Range Bounce strategy guide
-    ├── ema_pullback_continuation.pine         # EMA 9/21 Pullback Continuation trend strategy
-    └── ema_pullback_continuation.description.md # EMA 9/21 Pullback Continuation strategy guide
+├── Sculping Strategies/                       # BTC 5m & 15m scalping strategies directory
+│   ├── camarilla_range_bounce.pine            # Camarilla Range Bounce mean-reversion strategy
+│   ├── camarilla_range_bounce.description.md  # Camarilla Range Bounce strategy guide
+│   ├── ema_pullback_continuation.pine         # EMA 9/21 Pullback Continuation trend strategy
+│   └── ema_pullback_continuation.description.md # EMA 9/21 Pullback Continuation strategy guide
+└── btc_asia_sweep/                            # BTC Asia session range sweep & reclaim strategy
+    ├── midnight_pickle_asia_sweep_v1.pine     # Asia Range Sweep & Reclaim v1 strategy source
+    ├── asia_sweep_strategy_guide.md           # Comprehensive strategy and timezone guide
+    └── btc_asia_sweep_playbook.html           # Interactive visual strategy playbook
 ```
 
 ---

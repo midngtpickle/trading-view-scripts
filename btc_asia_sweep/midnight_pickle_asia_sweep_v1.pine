@@ -1,0 +1,710 @@
+//@version=6
+// ═══════════════════════════════════════════════════════════════════════════
+//  🌙🥒 BTC Asia Range Sweep & Reclaim — v1
+//  A Midnight Pickle Production
+// ---------------------------------------------------------------------------
+//  CONCEPT
+//  After the US cash close, order books thin out. A range ("Asia Box") forms.
+//  Price then pushes outside that range into resting stops, fails to hold, and
+//  reclaims the range. We fade the failed break back toward the box.
+//
+//  TIMEZONE
+//  Everything is anchored to America/New_York (US DST) or Asia/Tokyo (no DST).
+//  NEVER anchor this to NZ local time — NZ and US DST transitions are ~5 weeks
+//  apart, so a local-time anchor silently drifts by an hour twice a year.
+//
+//  Default box window 16:00-18:00 ET = the US settlement vacuum.
+//  Default day mask  Sun-Thu ET      = Mon-Fri mornings NZ.  (Pine: 1=Sun)
+//
+//  LAYERING ORDER — read this before you tune anything
+//  Run 1: everything optional OFF (no divergence, no volume, no DXY, no
+//         liquidity proxy). This is the mechanical baseline. If it has no
+//         edge net of fees, no filter will save it — it will only shrink the
+//         sample until the noise looks like a signal.
+//  Run 2: add ONE filter. Record the delta in trade count and net R.
+//  Run 3: repeat. Anything that improves avg R but cuts trades by >50% is
+//         probably curve-fitting, not filtering.
+//
+//  WHAT THIS CANNOT TEST
+//  Liquidation heatmap density (Coinglass/Hyblock) has no Pine feed. The
+//  sweep-depth, volume-spike and prior-day-level gates are PROXIES for it.
+//  They are not the same thing. If the mechanical version is flat and your
+//  discretionary version is not, the heatmap read is carrying the strategy.
+//
+//  DIVERGENCE ENGINE — ported from midnight_pickle_divergence_v1.pine
+//  Closed here: multi-occurrence pivot scan (was occurrence-1 only), price
+//  pivot verification, freshness gate. Added: a zero-lag box-anchored mode,
+//  because pivot divergence confirms lbR bars late and the reclaim does not
+//  wait for it.
+// ═══════════════════════════════════════════════════════════════════════════
+
+strategy(
+     title                 = "🌙🥒 Asia Range Sweep & Reclaim v1",
+     shorttitle            = "🌙🥒 Sweep v1",
+     overlay               = true,
+     initial_capital       = 10000,
+     default_qty_type      = strategy.fixed,
+     default_qty_value     = 1,
+     pyramiding            = 0,
+     commission_type       = strategy.commission.percent,
+     commission_value      = 0.045,
+     slippage              = 2,
+     process_orders_on_close = true,
+     calc_on_every_tick    = false,
+     max_boxes_count       = 500,
+     max_lines_count       = 500,
+     max_labels_count      = 500)
+
+// ───────────────────────────────────────────────────────────── Input groups
+G_SES = "① Session Windows (NY-anchored)"
+G_BOX = "② Asia Box"
+G_SWP = "③ Sweep Detection"
+G_DIV = "④ Divergence Filter"
+G_PRX = "⑤ Liquidity Proxies (heatmap stand-ins)"
+G_MAC = "⑥ Macro / News"
+G_RSK = "⑦ Risk & Targets"
+G_VIS = "⑧ Visuals & Stats"
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  ① SESSION WINDOWS
+// ═══════════════════════════════════════════════════════════════════════════
+boxSess    = input.session("1600-1800", "Asia Box window (ET)", group = G_SES,
+     tooltip = "US cash close + 2h. 16:00 ET is the settlement print.")
+powSess    = input.session("1800-2000", "Power window (ET)", group = G_SES,
+     tooltip = "Where sweeps are hunted. Shift this +1h / +2h to test the " +
+               "Tokyo-open variant — 00:00 UTC (19:00 ET winter) is when " +
+               "Japanese cash actually opens.")
+dayMask    = input.string("12345", "Day mask (1=Sun … 7=Sat)", group = G_SES,
+     tooltip = "Default 12345 = Sun-Thu ET = Mon-Fri mornings in NZ. " +
+               "The NZ Monday session begins Sunday afternoon ET.")
+useDead    = input.bool(true, "Block entries during Tokyo lunch", group = G_SES)
+deadSess   = input.session("1130-1230", "Tokyo lunch (JST)", group = G_SES,
+     tooltip = "Japan does not observe DST, so this is anchored to Asia/Tokyo " +
+               "directly rather than converted.")
+flatByEnd  = input.bool(false, "Force flat at end of power window", group = G_SES)
+maxHoldBar = input.int(48, "Max hold (bars, 0 = off)", minval = 0, group = G_SES)
+
+TZ_NY = "America/New_York"
+TZ_JP = "Asia/Tokyo"
+
+inBox   = not na(time(timeframe.period, boxSess  + ":" + dayMask, TZ_NY))
+inPower = not na(time(timeframe.period, powSess  + ":" + dayMask, TZ_NY))
+inDead  = useDead and not na(time(timeframe.period, deadSess + ":1234567", TZ_JP))
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  ② ASIA BOX
+// ═══════════════════════════════════════════════════════════════════════════
+minBoxAtr  = input.float(0.0, "Min box height (ATR mult, 0 = off)", minval = 0, step = 0.1, group = G_BOX)
+maxBoxAtr  = input.float(0.0, "Max box height (ATR mult, 0 = off)", minval = 0, step = 0.1, group = G_BOX,
+     tooltip = "A box that is already enormous is not consolidation — it is a " +
+               "trend day that happened to straddle the window.")
+maxTrades  = input.int(1, "Max trades per session", minval = 1, maxval = 5, group = G_BOX)
+
+atrLen = input.int(14, "ATR length", minval = 1, group = G_BOX)
+atrV   = ta.atr(atrLen)
+
+var float bH       = na      // frozen box high
+var float bL       = na      // frozen box low
+var float runH     = na
+var float runL     = na
+var int   boxLeft  = na
+var bool  boxValid = false
+var int   tradesThisSession = 0
+
+boxStart = inBox and not inBox[1]
+boxEnd   = not inBox and inBox[1]
+
+if boxStart
+    runH     := high
+    runL     := low
+    boxLeft  := bar_index
+    boxValid := false
+    tradesThisSession := 0
+    bH := na
+    bL := na
+else if inBox
+    runH := math.max(nz(runH, high), high)
+    runL := math.min(nz(runL, low),  low)
+
+if boxEnd
+    bH := runH
+    bL := runL
+    boxH = bH - bL
+    okMin = minBoxAtr == 0.0 or boxH >= minBoxAtr * atrV
+    okMax = maxBoxAtr == 0.0 or boxH <= maxBoxAtr * atrV
+    boxValid := okMin and okMax and not na(bH) and not na(bL) and boxH > 0
+
+boxMid   = boxValid ? (bH + bL) / 2.0 : na
+boxHt    = boxValid ? bH - bL : na
+boxHtAtr = boxValid and atrV > 0 ? boxHt / atrV : na
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  ③ SWEEP DETECTION
+// ═══════════════════════════════════════════════════════════════════════════
+minPenAtr  = input.float(0.15, "Min sweep depth (ATR mult)", minval = 0, step = 0.05, group = G_SWP,
+     tooltip = "Below this it is a tag, not a sweep — no stops were taken.")
+maxPenAtr  = input.float(1.50, "Max sweep depth (ATR mult)", minval = 0.1, step = 0.1, group = G_SWP,
+     tooltip = "Beyond this the range is genuinely broken. Invalidate, do not fade.")
+armExpiry  = input.int(12, "Sweep expiry (bars)", minval = 1, group = G_SWP,
+     tooltip = "If price has not reclaimed within this many bars the failed " +
+               "break is no longer failing — it is just a downtrend.")
+reclaimBuf = input.float(0.0, "Reclaim buffer (ATR mult)", minval = 0, step = 0.05, group = G_SWP,
+     tooltip = "Close must be this far back inside the box, not merely across the line.")
+allowLong  = input.bool(true,  "Allow longs (sweep box low)",  group = G_SWP)
+allowShort = input.bool(true,  "Allow shorts (sweep box high)", group = G_SWP)
+
+var bool  armL     = false
+var float sweepLo  = na
+var int   armLBar  = na
+var float sweepLoVol = na
+var bool  armS     = false
+var float sweepHi  = na
+var int   armSBar  = na
+var float sweepHiVol = na
+
+// reset arming at each new box
+if boxStart
+    armL := false
+    armS := false
+    sweepLo := na
+    sweepHi := na
+    armLBar := na
+    armSBar := na
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  ④ DIVERGENCE ENGINE  (ported + finished)
+// ═══════════════════════════════════════════════════════════════════════════
+divMode    = input.string("Box-anchored", "Divergence mode", group = G_DIV,
+     options = ["Off", "Box-anchored", "Pivot (strict)"],
+     tooltip = "Box-anchored: zero lag. Compares the oscillator at the sweep " +
+               "extreme against its own extreme during the box window. " +
+               "Pivot (strict): the classic pivot/valuewhen method — correct, " +
+               "but confirms 'Pivot Right' bars AFTER the fact, which is often " +
+               "after the reclaim has already run.")
+oscType    = input.string("RSI", "Oscillator", group = G_DIV,
+     options = ["RSI", "Stochastic", "MFI", "CCI", "MACD Histogram", "OBV"],
+     tooltip = "MFI and OBV require volume. MACD Hist / CCI / OBV are unbounded, " +
+               "so the location gate switches to adaptive percentile zones.")
+oscSrc     = input.source(close, "Oscillator source", group = G_DIV)
+oscLen     = input.int(14, "Oscillator length", minval = 1, group = G_DIV)
+macdFast   = input.int(12, "MACD fast",   minval = 1, group = G_DIV)
+macdSlow   = input.int(26, "MACD slow",   minval = 1, group = G_DIV)
+macdSig    = input.int(9,  "MACD signal", minval = 1, group = G_DIV)
+
+locMode    = input.string("Current pivot", "Location gate", group = G_DIV,
+     options = ["Off", "Current pivot", "Both pivots"])
+fixedOB    = input.float(70, "Fixed overbought", group = G_DIV)
+fixedOS    = input.float(30, "Fixed oversold",   group = G_DIV)
+pctLen     = input.int(200, "Adaptive zone lookback", minval = 20, group = G_DIV)
+
+magMode    = input.string("StdDev", "Magnitude mode", options = ["StdDev", "Absolute", "Off"], group = G_DIV)
+magStd     = input.float(0.5, "Min osc delta (σ)", minval = 0, step = 0.1, group = G_DIV)
+magAbs     = input.float(3.0, "Min osc delta (absolute)", minval = 0, step = 0.5, group = G_DIV)
+magStdLen  = input.int(100, "σ lookback", minval = 10, group = G_DIV)
+minPriceAtr= input.float(0.25, "Min price delta (ATR mult)", minval = 0, step = 0.05, group = G_DIV)
+
+lbL        = input.int(5, "Pivot lookback left",  minval = 1, group = G_DIV)
+lbR        = input.int(5, "Pivot lookback right", minval = 1, group = G_DIV)
+occScan    = input.int(3, "Pivot occurrences to scan", minval = 1, maxval = 3, group = G_DIV)
+rangeLower = input.int(5,  "Min bars between pivots", minval = 1, group = G_DIV)
+rangeUpper = input.int(60, "Max bars between pivots", minval = 2, group = G_DIV)
+divFresh   = input.int(10, "Max divergence age at entry (bars)", minval = 1, group = G_DIV)
+
+// --- all oscillators computed unconditionally --------------------------------
+// ta.* functions carry internal state. Calling them inside a conditional branch
+// starves that state and returns silently wrong values. Compute all, then select.
+_rsi   = ta.rsi(oscSrc, oscLen)
+_stoch = ta.sma(ta.stoch(close, high, low, oscLen), 3)
+_mfi   = ta.mfi(hlc3, oscLen)
+_cci   = ta.cci(oscSrc, oscLen)
+[_ml, _sl, _hist] = ta.macd(oscSrc, macdFast, macdSlow, macdSig)
+_obv   = ta.obv
+
+osc = switch oscType
+    "RSI"             => _rsi
+    "Stochastic"      => _stoch
+    "MFI"             => _mfi
+    "CCI"             => _cci
+    "MACD Histogram"  => _hist
+    "OBV"             => _obv
+    => _rsi
+
+isBounded = oscType == "RSI" or oscType == "Stochastic" or oscType == "MFI"
+_pctHi = ta.percentile_linear_interpolation(osc, pctLen, 80)
+_pctLo = ta.percentile_linear_interpolation(osc, pctLen, 20)
+obLvl  = isBounded ? fixedOB : _pctHi
+osLvl  = isBounded ? fixedOS : _pctLo
+
+oscStd = ta.stdev(osc, magStdLen)
+minOscDelta = switch magMode
+    "StdDev"   => magStd * nz(oscStd, 0.0)
+    "Absolute" => magAbs
+    => 0.0
+
+// --- box-anchored oscillator extremes ---------------------------------------
+var float oscBoxMin = na
+var float oscBoxMax = na
+if boxStart
+    oscBoxMin := osc
+    oscBoxMax := osc
+else if inBox
+    oscBoxMin := math.min(nz(oscBoxMin, osc), osc)
+    oscBoxMax := math.max(nz(oscBoxMax, osc), osc)
+
+var float oscAtSweepLo = na
+var float oscAtSweepHi = na
+
+// --- pivot divergence (strict) ----------------------------------------------
+plFound = not na(ta.pivotlow(osc, lbL, lbR))
+phFound = not na(ta.pivothigh(osc, lbL, lbR))
+pPlOk   = not na(ta.pivotlow(low,  lbL, lbR))   // price pivot verification
+pPhOk   = not na(ta.pivothigh(high, lbL, lbR))
+
+oscPL1 = ta.valuewhen(plFound, osc[lbR], 1)
+oscPL2 = ta.valuewhen(plFound, osc[lbR], 2)
+oscPL3 = ta.valuewhen(plFound, osc[lbR], 3)
+lowPL1 = ta.valuewhen(plFound, low[lbR], 1)
+lowPL2 = ta.valuewhen(plFound, low[lbR], 2)
+lowPL3 = ta.valuewhen(plFound, low[lbR], 3)
+barPL1 = ta.valuewhen(plFound, bar_index[lbR], 1)
+barPL2 = ta.valuewhen(plFound, bar_index[lbR], 2)
+barPL3 = ta.valuewhen(plFound, bar_index[lbR], 3)
+zonePL1 = ta.valuewhen(plFound, osc[lbR] < osLvl[lbR] ? 1 : 0, 1)
+zonePL2 = ta.valuewhen(plFound, osc[lbR] < osLvl[lbR] ? 1 : 0, 2)
+zonePL3 = ta.valuewhen(plFound, osc[lbR] < osLvl[lbR] ? 1 : 0, 3)
+
+oscPH1 = ta.valuewhen(phFound, osc[lbR], 1)
+oscPH2 = ta.valuewhen(phFound, osc[lbR], 2)
+oscPH3 = ta.valuewhen(phFound, osc[lbR], 3)
+higPH1 = ta.valuewhen(phFound, high[lbR], 1)
+higPH2 = ta.valuewhen(phFound, high[lbR], 2)
+higPH3 = ta.valuewhen(phFound, high[lbR], 3)
+barPH1 = ta.valuewhen(phFound, bar_index[lbR], 1)
+barPH2 = ta.valuewhen(phFound, bar_index[lbR], 2)
+barPH3 = ta.valuewhen(phFound, bar_index[lbR], 3)
+zonePH1 = ta.valuewhen(phFound, osc[lbR] > obLvl[lbR] ? 1 : 0, 1)
+zonePH2 = ta.valuewhen(phFound, osc[lbR] > obLvl[lbR] ? 1 : 0, 2)
+zonePH3 = ta.valuewhen(phFound, osc[lbR] > obLvl[lbR] ? 1 : 0, 3)
+
+// one occurrence check for a bullish (regular) divergence
+_bullOcc(float pOsc, float pLow, float pBar, float pZone) =>
+    ok = false
+    if not na(pOsc) and not na(pLow) and not na(pBar)
+        gap      = (bar_index - lbR) - pBar
+        inGap    = gap >= rangeLower and gap <= rangeUpper
+        oscHL    = osc[lbR] - pOsc >= minOscDelta
+        priceLL  = pLow - low[lbR] >= minPriceAtr * nz(atrV[lbR], 0.0)
+        curZone  = osc[lbR] < osLvl[lbR]
+        prvZone  = pZone == 1
+        locOk    = switch locMode
+            "Off"           => true
+            "Current pivot" => curZone
+            "Both pivots"   => curZone and prvZone
+            => true
+        ok := inGap and oscHL and priceLL and locOk
+    ok
+
+_bearOcc(float pOsc, float pHigh, float pBar, float pZone) =>
+    ok = false
+    if not na(pOsc) and not na(pHigh) and not na(pBar)
+        gap      = (bar_index - lbR) - pBar
+        inGap    = gap >= rangeLower and gap <= rangeUpper
+        oscLH    = pOsc - osc[lbR] >= minOscDelta
+        priceHH  = high[lbR] - pHigh >= minPriceAtr * nz(atrV[lbR], 0.0)
+        curZone  = osc[lbR] > obLvl[lbR]
+        prvZone  = pZone == 1
+        locOk    = switch locMode
+            "Off"           => true
+            "Current pivot" => curZone
+            "Both pivots"   => curZone and prvZone
+            => true
+        ok := inGap and oscLH and priceHH and locOk
+    ok
+
+bullPivotRaw = plFound and pPlOk and (
+     _bullOcc(oscPL1, lowPL1, barPL1, zonePL1) or
+     (occScan >= 2 and _bullOcc(oscPL2, lowPL2, barPL2, zonePL2)) or
+     (occScan >= 3 and _bullOcc(oscPL3, lowPL3, barPL3, zonePL3)))
+
+bearPivotRaw = phFound and pPhOk and (
+     _bearOcc(oscPH1, higPH1, barPH1, zonePH1) or
+     (occScan >= 2 and _bearOcc(oscPH2, higPH2, barPH2, zonePH2)) or
+     (occScan >= 3 and _bearOcc(oscPH3, higPH3, barPH3, zonePH3)))
+
+bullPivot = bullPivotRaw and barstate.isconfirmed
+bearPivot = bearPivotRaw and barstate.isconfirmed
+
+bullFresh = ta.barssince(bullPivot) <= divFresh
+bearFresh = ta.barssince(bearPivot) <= divFresh
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  ⑤ LIQUIDITY PROXIES
+// ═══════════════════════════════════════════════════════════════════════════
+useVolSpk  = input.bool(false, "Require volume spike on sweep bar", group = G_PRX)
+volLen     = input.int(50, "Volume MA length", minval = 5, group = G_PRX)
+volMult    = input.float(1.5, "Volume spike multiple", minval = 1.0, step = 0.1, group = G_PRX)
+usePdLevel = input.bool(false, "Require sweep near prior-day H/L", group = G_PRX)
+pdTol      = input.float(0.75, "Prior-day level tolerance (ATR mult)", minval = 0.1, step = 0.05, group = G_PRX)
+
+volMA  = ta.sma(volume, volLen)
+pdHigh = request.security(syminfo.tickerid, "D", high[1], lookahead = barmerge.lookahead_on)
+pdLow  = request.security(syminfo.tickerid, "D", low[1],  lookahead = barmerge.lookahead_on)
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  ⑥ MACRO / NEWS
+// ═══════════════════════════════════════════════════════════════════════════
+useDxy   = input.bool(false, "Use DXY momentum filter", group = G_MAC)
+dxySym   = input.symbol("TVC:DXY", "DXY symbol", group = G_MAC)
+dxyTf    = input.timeframe("60", "DXY timeframe", group = G_MAC)
+dxyLen   = input.int(4, "DXY ROC length", minval = 1, group = G_MAC)
+dxyAbort = input.float(0.15, "Abort if |ROC| exceeds (%)", minval = 0.01, step = 0.01, group = G_MAC,
+     tooltip = "Longs abort on a hard DXY rip up; shorts abort on a hard dump.")
+newsDates = input.string("", "News blackout dates (YYYY-MM-DD, comma separated)", group = G_MAC,
+     tooltip = "Pine has no economic calendar. Paste CPI/FOMC/NFP dates here " +
+               "(ET dates). Session is skipped entirely on those days.")
+
+dxyRoc = request.security(dxySym, dxyTf, ta.roc(close, dxyLen)[1],
+     lookahead = barmerge.lookahead_on, ignore_invalid_symbol = true)
+
+var array<string> newsArr = na
+if barstate.isfirst
+    cleaned = str.replace_all(newsDates, " ", "")
+    newsArr := str.length(cleaned) > 0 ? str.split(cleaned, ",") : array.new<string>(0)
+
+todayNY  = str.format_time(time, "yyyy-MM-dd", TZ_NY)
+newsHalt = not na(newsArr) and array.size(newsArr) > 0 and array.includes(newsArr, todayNY)
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  ⑦ RISK & TARGETS
+// ═══════════════════════════════════════════════════════════════════════════
+stopMode   = input.string("Max of both", "Stop placement", group = G_RSK,
+     options = ["Percent", "ATR", "Max of both"],
+     tooltip = "A flat 0.2% stop on BTC perps means round-trip fees are ~0.45R. " +
+               "The ATR floor stops fee drag from eating the whole edge.")
+stopPct    = input.float(0.20, "Stop % beyond wick", minval = 0.01, step = 0.01, group = G_RSK)
+stopAtr    = input.float(0.35, "Stop ATR mult beyond wick", minval = 0.05, step = 0.05, group = G_RSK)
+riskPct    = input.float(1.0,  "Risk per trade (% equity)", minval = 0.1, step = 0.1, group = G_RSK)
+maxRiskPct = input.float(1.20, "Skip trade if stop distance > (% of price)", minval = 0.1, step = 0.05, group = G_RSK,
+     tooltip = "Guards against a deep sweep wick producing unbounded risk. " +
+               "Skipped trades are counted in the stats table.")
+tp1Pct     = input.int(50, "TP1 size (% of position)", minval = 10, maxval = 90, group = G_RSK)
+useBE      = input.bool(true, "Move stop to breakeven after TP1", group = G_RSK)
+beOffset   = input.float(0.05, "Breakeven offset (% in your favour)", minval = 0, step = 0.01, group = G_RSK,
+     tooltip = "0 = true breakeven, which is a loss after fees. Small positive " +
+               "offset covers the round trip.")
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  SWEEP STATE MACHINE
+// ═══════════════════════════════════════════════════════════════════════════
+tradeWindow = inPower and boxValid and not inDead and not newsHalt and tradesThisSession < maxTrades
+
+// --- arm / update / invalidate: LONG side (sweep of box low) -----------------
+if inPower and boxValid
+    if low < bL
+        if not armL
+            armL       := true
+            armLBar    := bar_index
+            sweepLo    := low
+            sweepLoVol := volume
+            oscAtSweepLo := osc
+        else
+            if low < nz(sweepLo, low)
+                sweepLo    := low
+                sweepLoVol := volume
+                oscAtSweepLo := osc
+    if armL
+        tooDeep = bL - nz(sweepLo, bL) > maxPenAtr * atrV
+        stale   = bar_index - nz(armLBar, bar_index) > armExpiry
+        if tooDeep or stale
+            armL := false
+
+// --- arm / update / invalidate: SHORT side (sweep of box high) ---------------
+if inPower and boxValid
+    if high > bH
+        if not armS
+            armS       := true
+            armSBar    := bar_index
+            sweepHi    := high
+            sweepHiVol := volume
+            oscAtSweepHi := osc
+        else
+            if high > nz(sweepHi, high)
+                sweepHi    := high
+                sweepHiVol := volume
+                oscAtSweepHi := osc
+    if armS
+        tooDeep = nz(sweepHi, bH) - bH > maxPenAtr * atrV
+        stale   = bar_index - nz(armSBar, bar_index) > armExpiry
+        if tooDeep or stale
+            armS := false
+
+// --- gates -------------------------------------------------------------------
+penL    = armL ? bL - nz(sweepLo, bL) : na
+penS    = armS ? nz(sweepHi, bH) - bH : na
+penLOk  = armL and penL >= minPenAtr * atrV and penL <= maxPenAtr * atrV
+penSOk  = armS and penS >= minPenAtr * atrV and penS <= maxPenAtr * atrV
+
+volLOk  = not useVolSpk or (not na(sweepLoVol) and not na(volMA) and sweepLoVol >= volMult * volMA)
+volSOk  = not useVolSpk or (not na(sweepHiVol) and not na(volMA) and sweepHiVol >= volMult * volMA)
+
+pdLOk   = not usePdLevel or (not na(pdLow)  and math.abs(nz(sweepLo, bL) - pdLow)  <= pdTol * atrV)
+pdSOk   = not usePdLevel or (not na(pdHigh) and math.abs(nz(sweepHi, bH) - pdHigh) <= pdTol * atrV)
+
+// Box-anchored divergence: price made a lower low vs the box, oscillator did not.
+divBoxL = not na(oscAtSweepLo) and not na(oscBoxMin) and (oscAtSweepLo - oscBoxMin) >= minOscDelta
+divBoxS = not na(oscAtSweepHi) and not na(oscBoxMax) and (oscBoxMax - oscAtSweepHi) >= minOscDelta
+
+divLOk = switch divMode
+    "Off"            => true
+    "Box-anchored"   => divBoxL
+    "Pivot (strict)" => bullFresh
+    => true
+divSOk = switch divMode
+    "Off"            => true
+    "Box-anchored"   => divBoxS
+    "Pivot (strict)" => bearFresh
+    => true
+
+dxyLOk = not useDxy or na(dxyRoc) or dxyRoc <=  dxyAbort
+dxySOk = not useDxy or na(dxyRoc) or dxyRoc >= -dxyAbort
+
+// --- reclaim trigger ---------------------------------------------------------
+reclaimL = armL and close > bL + reclaimBuf * atrV
+reclaimS = armS and close < bH - reclaimBuf * atrV
+
+rawLong  = allowLong  and tradeWindow and reclaimL and penLOk and volLOk and pdLOk and divLOk and dxyLOk
+rawShort = allowShort and tradeWindow and reclaimS and penSOk and volSOk and pdSOk and divSOk and dxySOk
+
+// --- stop / risk sizing ------------------------------------------------------
+_stopDist(float anchor, float px) =>
+    byPct = px * stopPct / 100.0
+    byAtr = stopAtr * atrV
+    d = switch stopMode
+        "Percent"     => byPct
+        "ATR"         => byAtr
+        "Max of both" => math.max(byPct, byAtr)
+        => byPct
+    d
+
+longStop  = rawLong  ? nz(sweepLo, bL) - _stopDist(nz(sweepLo, bL), close) : na
+shortStop = rawShort ? nz(sweepHi, bH) + _stopDist(nz(sweepHi, bH), close) : na
+
+longRiskU  = rawLong  ? close - longStop  : na
+shortRiskU = rawShort ? shortStop - close : na
+
+var int skippedRisk = 0
+longRiskOk  = rawLong  and longRiskU  > 0 and (longRiskU  / close * 100.0) <= maxRiskPct
+shortRiskOk = rawShort and shortRiskU > 0 and (shortRiskU / close * 100.0) <= maxRiskPct
+if (rawLong and not longRiskOk) or (rawShort and not shortRiskOk)
+    skippedRisk += 1
+
+goLong  = longRiskOk  and strategy.position_size == 0
+goShort = shortRiskOk and strategy.position_size == 0
+
+qtyLong  = goLong  ? (strategy.equity * riskPct / 100.0) / longRiskU  : na
+qtyShort = goShort ? (strategy.equity * riskPct / 100.0) / shortRiskU : na
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  ORDERS
+// ═══════════════════════════════════════════════════════════════════════════
+var float curStop   = na
+var float tp1Px     = na
+var float tp2Px     = na
+var float initRiskU = na
+var float openNet   = na
+var float openQty   = na
+var float entryPen  = na
+var float entryBoxA = na
+var bool  entryLong = false
+var bool  tp1Done   = false
+var int   entryBar  = na
+
+if goLong
+    curStop   := longStop
+    tp1Px     := boxMid
+    tp2Px     := bH
+    initRiskU := longRiskU
+    entryPen  := penL / atrV
+    entryBoxA := boxHtAtr
+    entryLong := true
+    tp1Done   := false
+    entryBar  := bar_index
+    tradesThisSession += 1
+    strategy.entry("L", strategy.long, qty = qtyLong, comment = "Sweep↓ reclaim")
+
+if goShort
+    curStop   := shortStop
+    tp1Px     := boxMid
+    tp2Px     := bL
+    initRiskU := shortRiskU
+    entryPen  := penS / atrV
+    entryBoxA := boxHtAtr
+    entryLong := false
+    tp1Done   := false
+    entryBar  := bar_index
+    tradesThisSession += 1
+    strategy.entry("S", strategy.short, qty = qtyShort, comment = "Sweep↑ reclaim")
+
+justOpened = strategy.position_size != 0 and strategy.position_size[1] == 0
+justClosed = strategy.position_size == 0 and strategy.position_size[1] != 0
+
+if justOpened
+    openNet := strategy.netprofit
+    openQty := math.abs(strategy.position_size)
+
+// TP1 partial fill detection → breakeven shift
+if strategy.position_size != 0 and math.abs(strategy.position_size) < math.abs(nz(strategy.position_size[1], 0.0)) and not tp1Done
+    tp1Done := true
+    if useBE
+        ep = strategy.position_avg_price
+        curStop := entryLong ? ep * (1 + beOffset / 100.0) : ep * (1 - beOffset / 100.0)
+
+// live exits — must be re-issued each bar so curStop updates are honoured
+if strategy.position_size > 0
+    strategy.exit("L-TP1", from_entry = "L", qty_percent = tp1Pct, limit = tp1Px, stop = curStop)
+    strategy.exit("L-TP2", from_entry = "L", limit = tp2Px, stop = curStop)
+if strategy.position_size < 0
+    strategy.exit("S-TP1", from_entry = "S", qty_percent = tp1Pct, limit = tp1Px, stop = curStop)
+    strategy.exit("S-TP2", from_entry = "S", limit = tp2Px, stop = curStop)
+
+// time-based exits
+powEnd  = not inPower and inPower[1]
+holdOut = maxHoldBar > 0 and not na(entryBar) and (bar_index - entryBar) >= maxHoldBar
+if strategy.position_size != 0 and ((flatByEnd and powEnd) or holdOut)
+    strategy.close_all(comment = "Time exit")
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  R ACCOUNTING & BUCKETS
+// ═══════════════════════════════════════════════════════════════════════════
+// R is computed from the ORIGINAL stop and the ORIGINAL quantity, snapshotted
+// at entry. Breakeven shifts and partial scale-outs therefore cannot distort
+// the denominator — a common and quiet source of inflated backtest R.
+var float[] cnt   = array.new_float(8, 0.0)   // 0-1 dir, 2-4 sweep depth, 5-7 box width
+var float[] wins  = array.new_float(8, 0.0)
+var float[] sumR  = array.new_float(8, 0.0)
+var float   bestR = 0.0
+var float   totR  = 0.0
+var int     totN  = 0
+var int     winN  = 0
+
+_rec(int i, float r) =>
+    array.set(cnt,  i, array.get(cnt, i) + 1)
+    array.set(sumR, i, array.get(sumR, i) + r)
+    if r > 0
+        array.set(wins, i, array.get(wins, i) + 1)
+
+if justClosed and not na(openNet) and not na(initRiskU) and not na(openQty) and initRiskU > 0 and openQty > 0
+    riskDollar = initRiskU * openQty
+    r = (strategy.netprofit - openNet) / riskDollar
+    totR += r
+    totN += 1
+    if r > 0
+        winN += 1
+    if r > bestR
+        bestR := r
+    _rec(entryLong ? 0 : 1, r)
+    dBucket = na(entryPen) ? 3 : entryPen < 0.4 ? 2 : entryPen < 1.0 ? 3 : 4
+    _rec(dBucket, r)
+    wBucket = na(entryBoxA) ? 6 : entryBoxA < 1.5 ? 5 : entryBoxA < 3.0 ? 6 : 7
+    _rec(wBucket, r)
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  ⑧ VISUALS & STATS
+// ═══════════════════════════════════════════════════════════════════════════
+showBox   = input.bool(true, "Draw Asia Box", group = G_VIS)
+showShade = input.bool(true, "Shade windows", group = G_VIS)
+showTable = input.bool(true, "Show stats table", group = G_VIS)
+tblPos    = input.string("Top Right", "Table position", options = ["Top Right", "Top Left", "Bottom Right", "Bottom Left"], group = G_VIS)
+
+var box curBox = na
+if showBox and boxEnd and boxValid
+    curBox := box.new(boxLeft, bH, bar_index, bL,
+         border_color = color.new(color.teal, 20), border_width = 1,
+         bgcolor = color.new(color.teal, 92))
+if showBox and not na(curBox) and inPower
+    box.set_right(curBox, bar_index)
+
+plot(boxValid and (inPower or inBox) ? bH : na, "Box High", color.new(color.teal, 0), 1, plot.style_linebr)
+plot(boxValid and (inPower or inBox) ? bL : na, "Box Low",  color.new(color.teal, 0), 1, plot.style_linebr)
+plot(boxValid and (inPower or inBox) ? boxMid : na, "Box Mid", color.new(color.gray, 30), 1, plot.style_linebr)
+
+bgcolor(showShade and inBox   ? color.new(color.blue,   94) : na, title = "Box window")
+bgcolor(showShade and inPower ? color.new(color.orange, 94) : na, title = "Power window")
+bgcolor(showShade and inDead  ? color.new(color.red,    94) : na, title = "Tokyo lunch")
+
+plotshape(goLong,  "Long entry",  shape.triangleup,   location.belowbar, color.new(color.lime, 0), size = size.tiny)
+plotshape(goShort, "Short entry", shape.triangledown, location.abovebar, color.new(color.red,  0), size = size.tiny)
+
+// --- timeframe sanity warning -----------------------------------------------
+var label tfWarn = na
+if barstate.islast and timeframe.in_seconds() > 900
+    tfWarn := label.new(bar_index, high,
+         "⚠️ This strategy is designed for 1m-15m.\nOn " + timeframe.period +
+         " the sweep and reclaim happen inside a single bar\nand the backtest is meaningless.",
+         style = label.style_label_left, color = color.new(color.orange, 15),
+         textcolor = color.white, size = size.small, force_overlay = true)
+    label.delete(tfWarn[1])
+
+// --- stats table -------------------------------------------------------------
+_pos(string s) =>
+    p = switch s
+        "Top Right"    => position.top_right
+        "Top Left"     => position.top_left
+        "Bottom Right" => position.bottom_right
+        "Bottom Left"  => position.bottom_left
+        => position.top_right
+    p
+
+var table st = table.new(_pos(tblPos), 5, 13, border_width = 1,
+     frame_color = color.new(color.gray, 50), frame_width = 1)
+
+_row(int r, string lbl, int i) =>
+    n  = array.get(cnt, i)
+    w  = array.get(wins, i)
+    sr = array.get(sumR, i)
+    table.cell(st, 0, r, lbl, text_size = size.tiny, text_color = color.silver, text_halign = text.align_left)
+    table.cell(st, 1, r, str.tostring(n, "#"), text_size = size.tiny, text_color = color.silver)
+    table.cell(st, 2, r, n > 0 ? str.tostring(w / n * 100, "#.#") + "%" : "—", text_size = size.tiny, text_color = color.silver)
+    table.cell(st, 3, r, n > 0 ? str.tostring(sr / n, "#.##") : "—", text_size = size.tiny,
+         text_color = n > 0 and sr / n > 0 ? color.lime : color.red)
+    table.cell(st, 4, r, n > 0 ? str.tostring(sr, "#.#") : "—", text_size = size.tiny,
+         text_color = sr > 0 ? color.lime : color.red)
+
+if showTable and barstate.islast
+    table.clear(st, 0, 0, 4, 12)
+    table.cell(st, 0, 0, "🌙🥒 Sweep v1", text_size = size.tiny, text_color = color.white, bgcolor = color.new(color.teal, 40))
+    table.cell(st, 1, 0, "n",    text_size = size.tiny, text_color = color.white, bgcolor = color.new(color.teal, 40))
+    table.cell(st, 2, 0, "win%", text_size = size.tiny, text_color = color.white, bgcolor = color.new(color.teal, 40))
+    table.cell(st, 3, 0, "avgR", text_size = size.tiny, text_color = color.white, bgcolor = color.new(color.teal, 40))
+    table.cell(st, 4, 0, "netR", text_size = size.tiny, text_color = color.white, bgcolor = color.new(color.teal, 40))
+
+    table.cell(st, 0, 1, "DIRECTION", text_size = size.tiny, text_color = color.orange, text_halign = text.align_left)
+    _row(2, "  Long",  0)
+    _row(3, "  Short", 1)
+
+    table.cell(st, 0, 4, "SWEEP DEPTH", text_size = size.tiny, text_color = color.orange, text_halign = text.align_left)
+    _row(5, "  Shallow <0.4A", 2)
+    _row(6, "  Mid 0.4-1.0A",  3)
+    _row(7, "  Deep >1.0A",    4)
+
+    table.cell(st, 0, 8, "BOX WIDTH", text_size = size.tiny, text_color = color.orange, text_halign = text.align_left)
+    _row(9,  "  Narrow <1.5A", 5)
+    _row(10, "  Normal 1.5-3A", 6)
+    _row(11, "  Wide >3A",     7)
+
+    days = math.max(1.0, (last_bar_time - chart.left_visible_bar_time) / 86400000.0)
+    bestPct = totR != 0 ? bestR / totR * 100.0 : 0.0
+    footer = "TOTAL " + str.tostring(totN, "#") + " | " +
+             str.tostring(totN > 0 ? winN / totN * 100 : 0, "#.#") + "% | " +
+             "netR " + str.tostring(totR, "#.#") + " | " +
+             "best " + str.tostring(bestR, "#.#") + "R (" + str.tostring(bestPct, "#") + "% of net) | " +
+             "skipped(risk) " + str.tostring(skippedRisk, "#")
+    table.cell(st, 0, 12, footer, text_size = size.tiny, text_color = color.white,
+         bgcolor = color.new(color.gray, 70), text_halign = text.align_left)
+    table.merge_cells(st, 0, 12, 4, 12)
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  ALERTS
+// ═══════════════════════════════════════════════════════════════════════════
+alertcondition(goLong,  "Sweep Long",  "🌙🥒 Asia Box low swept and reclaimed — long")
+alertcondition(goShort, "Sweep Short", "🌙🥒 Asia Box high swept and reclaimed — short")

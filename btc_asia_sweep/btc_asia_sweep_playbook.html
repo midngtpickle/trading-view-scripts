@@ -1,0 +1,628 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BTC Asia Range Sweep Strategy Guide (NZST / NZDT Edition)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Plus Jakarta Sans', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'monospace'],
+                    },
+                    colors: {
+                        btc: {
+                            DEFAULT: '#F7931A',
+                            dark: '#CC740B',
+                            light: '#FFAB40',
+                            glow: 'rgba(247, 147, 26, 0.2)'
+                        },
+                        dark: {
+                            bg: '#0A0C10',
+                            card: '#12161F',
+                            border: '#1E2638',
+                            hover: '#19202E'
+                        },
+                        bullish: '#00E676',
+                        bearish: '#FF5252'
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body {
+            background-color: #0A0C10;
+            color: #E2E8F0;
+        }
+        .canva-card {
+            background: linear-gradient(145deg, #12161F 0%, #0D1117 100%);
+            border: 1px solid #1E2638;
+            box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.5);
+        }
+        .glow-btc {
+            box-shadow: 0 0 25px rgba(247, 147, 26, 0.25);
+        }
+        .glow-green {
+            box-shadow: 0 0 20px rgba(0, 230, 118, 0.2);
+        }
+        .glow-red {
+            box-shadow: 0 0 20px rgba(255, 82, 82, 0.2);
+        }
+        /* Custom scrollbars */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #0A0C10;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #1E2638;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #F7931A;
+        }
+    </style>
+</head>
+<body class="font-sans antialiased min-h-screen p-4 md:p-8">
+
+    <div class="max-w-7xl mx-auto space-y-8">
+        
+        <!-- HEADER & TOOLBAR -->
+        <header class="canva-card rounded-2xl p-6 relative overflow-hidden flex flex-col md:flex-row justify-between items-start md:items-center gap-6 border-b-4 border-btc">
+            <div class="absolute -right-12 -top-12 w-48 h-48 bg-btc/10 rounded-full blur-3xl pointer-events-none"></div>
+            <div>
+                <div class="flex items-center gap-3">
+                    <span class="px-3 py-1 rounded-full text-xs font-extrabold uppercase bg-btc/20 text-btc border border-btc/30 tracking-wider">
+                        BTC Pure Scalp Playbook
+                    </span>
+                    <span class="text-xs text-slate-400 flex items-center gap-1 font-mono">
+                        <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span> Dynamic NZ Timezone Engine
+                    </span>
+                </div>
+                <h1 class="text-3xl md:text-4xl font-extrabold text-white mt-2 tracking-tight">
+                    Asia Range Sweep Strategy <span class="text-btc">($BTC Only)</span>
+                </h1>
+                <p class="text-slate-400 text-sm mt-1 max-w-2xl">
+                    High-probability Bitcoin liquidity sweeps during the US Close & early Asian session transition. Precision 5M reclaims, liquidation magnets, and macro guardrails.
+                </p>
+            </div>
+
+            <!-- NZ TIMEZONE TOGGLE SWITCH -->
+            <div class="bg-dark-bg p-2 rounded-xl border border-dark-border flex items-center gap-3 self-stretch md:self-auto justify-between shadow-inner">
+                <div class="text-left px-2">
+                    <p class="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Active Season Clock</p>
+                    <p id="tz-label-display" class="text-xs font-bold text-btc font-mono">NZST (Winter Time)</p>
+                </div>
+                <div class="flex bg-dark-card p-1 rounded-lg border border-dark-border">
+                    <button id="btn-nzst" onclick="setTZ('NZST')" class="px-3 py-1.5 text-xs font-bold rounded-md bg-btc text-slate-900 transition duration-150">
+                        NZST <span class="text-[9px] opacity-75">(Winter UTC+12)</span>
+                    </button>
+                    <button id="btn-nzdt" onclick="setTZ('NZDT')" class="px-3 py-1.5 text-xs font-bold rounded-md text-slate-400 hover:text-white transition duration-150">
+                        NZDT <span class="text-[9px] opacity-75">(Summer UTC+13)</span>
+                    </button>
+                </div>
+            </div>
+        </header>
+
+        <!-- DAYLIGHT SAVING INFORMATION BANNER -->
+        <div class="bg-gradient-to-r from-amber-500/10 via-amber-500/5 to-transparent border-l-4 border-amber-500 p-4 rounded-r-xl flex items-start gap-4">
+            <svg class="w-6 h-6 text-amber-500 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <div class="text-xs text-slate-300 leading-relaxed">
+                <strong class="text-amber-400 font-bold uppercase tracking-wider block mb-0.5">Seasonal Timezone Rules (NZST vs NZDT Shift)</strong>
+                • <strong>NZST (Standard Time / Winter):</strong> Starts 1st Sunday in April (UTC+12). Markets occur 1 hour earlier on local NZ clocks.<br>
+                • <strong>NZDT (Daylight Saving / Summer):</strong> Starts last Sunday in September (UTC+13). All local NZ market hours shift <strong>+1 hour forward</strong>. Use the toggle above to automatically adjust all schedule parameters!
+            </div>
+        </div>
+
+        <!-- SECTION 1: TRADING CLOCK TABLE -->
+        <section class="canva-card rounded-2xl p-6">
+            <div class="flex flex-col md:flex-row justify-between md:items-center mb-6 gap-2">
+                <div>
+                    <h2 class="text-xl font-bold text-white flex items-center gap-2">
+                        <svg class="w-5 h-5 text-btc" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                        The $BTC Asia Trading Clock (Exact Liquidity Cycles)
+                    </h2>
+                    <p class="text-xs text-slate-400">Strict execution windows based on institutional settlement and Asian exchange opens</p>
+                </div>
+                <span class="text-xs font-mono bg-dark-bg px-3 py-1.5 rounded-lg text-slate-300 border border-dark-border" id="tz-current-indicator">
+                    Active Mode: <strong class="text-btc">NZST (Winter - UTC+12)</strong>
+                </span>
+            </div>
+
+            <div class="overflow-x-auto">
+                <table class="w-full text-left text-sm">
+                    <thead>
+                        <tr class="border-b border-dark-border text-xs uppercase text-slate-400 font-mono">
+                            <th class="pb-3 px-4">Time Window</th>
+                            <th class="pb-3 px-4">Market Phase</th>
+                            <th class="pb-3 px-4">Action Required for BTC</th>
+                            <th class="pb-3 px-4">Execution State</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-dark-border/50 font-mono text-xs">
+                        <tr class="hover:bg-dark-hover/50 transition">
+                            <td class="py-4 px-4 font-bold text-btc" id="time-usclose">08:00 AM</td>
+                            <td class="py-4 px-4 text-white font-sans font-semibold">US Session Close & Settlement</td>
+                            <td class="py-4 px-4 text-slate-300 font-sans">US institutional volume exits. BTC enters low-volume sideways consolidation.</td>
+                            <td class="py-4 px-4"><span class="px-2.5 py-1 rounded bg-slate-800 text-slate-300 text-[10px]">Observation</span></td>
+                        </tr>
+                        <tr class="hover:bg-dark-hover/50 transition">
+                            <td class="py-4 px-4 font-bold text-amber-400" id="time-report">08:15 AM</td>
+                            <td class="py-4 px-4 text-white font-sans font-semibold">Heatmap & Briefing Check</td>
+                            <td class="py-4 px-4 text-slate-300 font-sans">Open Coinglass/Hyblock heatmap. Mark high-density BTC liquidation clusters just outside the forming range.</td>
+                            <td class="py-4 px-4"><span class="px-2.5 py-1 rounded bg-amber-950/80 text-amber-300 border border-amber-800/40 text-[10px]">Preparation</span></td>
+                        </tr>
+                        <tr class="hover:bg-dark-hover/50 transition bg-btc/5">
+                            <td class="py-4 px-4 font-bold text-btc" id="time-box">08:00 AM – 10:00 AM</td>
+                            <td class="py-4 px-4 text-white font-sans font-semibold">Accumulation ("Asia Box")</td>
+                            <td class="py-4 px-4 text-slate-300 font-sans">Mark High and Low of this 2-hour window on 15M BTC chart. This forms the boundary of the manipulation trap.</td>
+                            <td class="py-4 px-4"><span class="px-2.5 py-1 rounded bg-blue-950/80 text-blue-300 border border-blue-800/40 text-[10px]">Mark Box Levels</span></td>
+                        </tr>
+                        <tr class="hover:bg-dark-hover/50 transition bg-emerald-950/20">
+                            <td class="py-4 px-4 font-bold text-bullish" id="time-power">10:00 AM – 12:00 PM</td>
+                            <td class="py-4 px-4 text-white font-sans font-semibold">Manipulation & Power Window</td>
+                            <td class="py-4 px-4 text-slate-300 font-sans">Early Sydney & Asian FX buildup into Tokyo Stock Exchange open (9:00 AM JST / 12:00 PM NZST). Watch for wick sweep & reclaim.</td>
+                            <td class="py-4 px-4"><span class="px-2.5 py-1 rounded bg-emerald-950 text-emerald-400 border border-emerald-800/50 font-bold text-[10px] animate-pulse">PRIME EXECUTION</span></td>
+                        </tr>
+                        <tr class="hover:bg-dark-hover/50 transition bg-rose-950/10">
+                            <td class="py-4 px-4 font-bold text-bearish" id="time-dead">02:30 PM – 03:30 PM</td>
+                            <td class="py-4 px-4 text-white font-sans font-semibold">Tokyo Lunch ("Dead Zone")</td>
+                            <td class="py-4 px-4 text-slate-300 font-sans">Tokyo Stock Exchange closes for lunch (11:30 AM – 12:30 PM JST). Volatility drops sharply. <strong>NO NEW ENTRIES</strong>.</td>
+                            <td class="py-4 px-4"><span class="px-2.5 py-1 rounded bg-rose-950 text-rose-300 border border-rose-900/40 text-[10px]">NO TRADE ZONE</span></td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- SECTION 2: VISUAL CHART DIAGRAM (AMD MODEL FOR BTC) -->
+        <section class="canva-card rounded-2xl p-6 relative overflow-hidden">
+            <div class="mb-4 flex flex-col md:flex-row justify-between md:items-center gap-2">
+                <div>
+                    <h2 class="text-xl font-bold text-white flex items-center gap-2">
+                        <svg class="w-5 h-5 text-btc" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16"/></svg>
+                        $BTC AMD Model Diagram (Accumulation → Manipulation → Distribution)
+                    </h2>
+                    <p class="text-xs text-slate-400">Visual anatomy of a 5-Minute Range Sweep & Reclaim Setup on Bitcoin</p>
+                </div>
+                <div class="flex flex-wrap gap-2">
+                    <span class="inline-flex items-center gap-1 text-[11px] font-mono bg-dark-bg px-2.5 py-1 rounded-lg border border-dark-border text-slate-300">
+                        <span class="w-2 h-2 rounded-full bg-blue-500"></span> 1. Accumulation
+                    </span>
+                    <span class="inline-flex items-center gap-1 text-[11px] font-mono bg-dark-bg px-2.5 py-1 rounded-lg border border-dark-border text-slate-300">
+                        <span class="w-2 h-2 rounded-full bg-rose-500"></span> 2. Manipulation
+                    </span>
+                    <span class="inline-flex items-center gap-1 text-[11px] font-mono bg-dark-bg px-2.5 py-1 rounded-lg border border-dark-border text-slate-300">
+                        <span class="w-2 h-2 rounded-full bg-emerald-500"></span> 3. Distribution
+                    </span>
+                </div>
+            </div>
+
+            <!-- SVG Trading Graphic Visual -->
+            <div class="w-full bg-dark-bg/90 rounded-xl p-4 border border-dark-border overflow-x-auto">
+                <svg viewBox="0 0 1000 440" class="w-full min-w-[780px] text-xs font-mono">
+                    <defs>
+                        <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+                            <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1E2638" stroke-width="0.5"/>
+                        </pattern>
+                        <linearGradient id="bullGradient" x1="0" y1="1" x2="0" y2="0">
+                            <stop offset="0%" stop-color="#00E676" stop-opacity="0.15"/>
+                            <stop offset="100%" stop-color="#00E676" stop-opacity="0"/>
+                        </linearGradient>
+                    </defs>
+                    <rect width="1000" height="440" fill="url(#grid)" />
+
+                    <!-- Phase Background Highlights -->
+                    <rect x="50" y="30" width="260" height="330" fill="#3B82F6" fill-opacity="0.04" stroke="#3B82F6" stroke-dasharray="4" stroke-width="1"/>
+                    <rect x="310" y="30" width="280" height="330" fill="#EF4444" fill-opacity="0.04" stroke="#EF4444" stroke-dasharray="4" stroke-width="1"/>
+                    <rect x="590" y="30" width="360" height="330" fill="#10B981" fill-opacity="0.04" stroke="#10B981" stroke-dasharray="4" stroke-width="1"/>
+
+                    <!-- Phase Titles -->
+                    <text x="180" y="55" fill="#60A5FA" font-weight="bold" text-anchor="middle" font-size="13">1. ACCUMULATION (Asia Box)</text>
+                    <text x="450" y="55" fill="#F87171" font-weight="bold" text-anchor="middle" font-size="13">2. MANIPULATION (Liquidity Sweep)</text>
+                    <text x="770" y="55" fill="#34D399" font-weight="bold" text-anchor="middle" font-size="13">3. DISTRIBUTION (Reclaim & Expansion)</text>
+
+                    <!-- Asia Box Outline -->
+                    <rect x="60" y="110" width="240" height="130" fill="none" stroke="#F7931A" stroke-width="2" stroke-dasharray="6"/>
+                    <text x="65" y="102" fill="#F7931A" font-weight="bold" font-size="11">Asia Box High (Resistance)</text>
+                    <text x="65" y="258" fill="#F7931A" font-weight="bold" font-size="11">Asia Box Low (Support)</text>
+
+                    <!-- Price Action Line -->
+                    <path d="M 60 170 L 80 140 L 100 190 L 120 130 L 150 200 L 180 150 L 210 210 L 240 160 L 270 220 L 300 180" 
+                          fill="none" stroke="#94A3B8" stroke-width="2"/>
+
+                    <!-- Sweep Phase Downward Liquidity Grab -->
+                    <path d="M 300 180 L 330 140 L 360 210 L 390 190 L 420 310 L 450 350 L 480 260 L 510 230 L 540 210 M 540 210 L 590 180" 
+                          fill="none" stroke="#EF4444" stroke-width="3"/>
+                    
+                    <!-- Wick & Heatmap Target Annotation -->
+                    <circle cx="450" cy="350" r="6" fill="#EF4444" />
+                    <line x1="450" y1="350" x2="450" y2="400" stroke="#EF4444" stroke-width="1.5" stroke-dasharray="2"/>
+                    <text x="450" y="415" fill="#F87171" font-weight="bold" text-anchor="middle" font-size="11">Liquidation Heatmap Magnet Cleared</text>
+
+                    <!-- Reclaim Point & Entry Trigger -->
+                    <circle cx="540" cy="210" r="7" fill="#00E676" />
+                    <text x="540" y="195" fill="#00E676" font-weight="bold" text-anchor="middle" font-size="11">ENTRY: 5M Candle Closes Inside Range</text>
+
+                    <!-- Upward Expansion Path -->
+                    <path d="M 590 180 L 640 160 L 680 130 L 730 170 L 780 110 L 830 120 L 900 70" 
+                          fill="none" stroke="#00E676" stroke-width="3.5"/>
+
+                    <!-- Target Lines -->
+                    <!-- Mid Range TP1 -->
+                    <line x1="60" y1="175" x2="940" y2="175" stroke="#64748B" stroke-width="1" stroke-dasharray="4"/>
+                    <text x="945" y="179" fill="#CBD5E1" font-size="10">50% Mid-Point (TP1)</text>
+
+                    <!-- Target TP2 -->
+                    <line x1="300" y1="110" x2="940" y2="110" stroke="#00E676" stroke-width="1.5" stroke-dasharray="4"/>
+                    <text x="945" y="114" fill="#00E676" font-weight="bold" font-size="10">Asia High (TP2 Target)</text>
+
+                    <!-- Stop Loss Line -->
+                    <line x1="420" y1="365" x2="600" y2="365" stroke="#F87171" stroke-width="1.5" stroke-dasharray="3"/>
+                    <text x="610" y="369" fill="#F87171" font-size="10">Hard SL (0.2% below extreme wick)</text>
+
+                    <!-- Callout Badges -->
+                    <g transform="translate(70, 280)">
+                        <rect width="210" height="45" rx="6" fill="#12161F" stroke="#F7931A" stroke-width="1"/>
+                        <text x="10" y="18" fill="#F7931A" font-weight="bold" font-size="10">HEATMAP MAGNET CHECK:</text>
+                        <text x="10" y="33" fill="#94A3B8" font-size="9">Verify high-density stops beyond Asia Low</text>
+                    </g>
+
+                    <g transform="translate(680, 280)">
+                        <rect width="210" height="45" rx="6" fill="#12161F" stroke="#00E676" stroke-width="1"/>
+                        <text x="10" y="18" fill="#00E676" font-weight="bold" font-size="10">5M RSI DIVERGENCE:</text>
+                        <text x="10" y="33" fill="#94A3B8" font-size="9">Confirm higher low on 5M RSI indicator</text>
+                    </g>
+                </svg>
+            </div>
+        </section>
+
+        <!-- SECTION 3: STEP-BY-STEP EXECUTION PLAYBOOK -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+            
+            <!-- Step 1 -->
+            <div class="canva-card rounded-2xl p-6 border-t-4 border-blue-500 flex flex-col justify-between">
+                <div>
+                    <div class="flex justify-between items-center mb-4">
+                        <span class="w-8 h-8 rounded-full bg-blue-500/20 text-blue-400 font-bold flex items-center justify-center font-mono">1</span>
+                        <span class="text-xs font-mono text-slate-400">15M Chart Setup</span>
+                    </div>
+                    <h3 class="text-lg font-bold text-white mb-2">Identify the "Asia Box"</h3>
+                    <p class="text-xs text-slate-300 leading-relaxed mb-4">
+                        Draw a horizontal range box enclosing all 15M candles formed between 08:00 AM – 10:00 AM NZST (09:00 AM – 11:00 AM NZDT).
+                    </p>
+                    <ul class="text-xs text-slate-400 space-y-2 font-mono">
+                        <li class="flex items-center gap-2">
+                            <span class="text-blue-400">►</span> Top Boundary: Range High (Resistance)
+                        </li>
+                        <li class="flex items-center gap-2">
+                            <span class="text-blue-400">►</span> Bottom Boundary: Range Low (Support)
+                        </li>
+                        <li class="flex items-center gap-2">
+                            <span class="text-blue-400">►</span> Mid-point: 50% Equilibrium Level
+                        </li>
+                    </ul>
+                </div>
+                <div class="mt-6 pt-4 border-t border-dark-border text-[11px] text-slate-400">
+                    💡 <em>Never take entries inside the box. Wait for price to break out.</em>
+                </div>
+            </div>
+
+            <!-- Step 2 -->
+            <div class="canva-card rounded-2xl p-6 border-t-4 border-amber-500 flex flex-col justify-between">
+                <div>
+                    <div class="flex justify-between items-center mb-4">
+                        <span class="w-8 h-8 rounded-full bg-amber-500/20 text-amber-400 font-bold flex items-center justify-center font-mono">2</span>
+                        <span class="text-xs font-mono text-slate-400">Liquidity Trap</span>
+                    </div>
+                    <h3 class="text-lg font-bold text-white mb-2">Wait for the "Fakeout"</h3>
+                    <p class="text-xs text-slate-300 leading-relaxed mb-4">
+                        During the Power Window, look for an aggressive push outside the range to trigger retail stop orders.
+                    </p>
+                    <div class="space-y-2 text-xs">
+                        <div class="p-2.5 rounded-lg bg-rose-950/30 border border-rose-900/50">
+                            <strong class="text-rose-400 block">Long Trap (Bottom Sweep)</strong>
+                            <p class="text-[11px] text-slate-300">Price breaks Asia Low. Retail shorts enter. Wick hits heatmap magnet.</p>
+                        </div>
+                        <div class="p-2.5 rounded-lg bg-emerald-950/30 border border-emerald-900/50">
+                            <strong class="text-emerald-400 block">Short Trap (Top Sweep)</strong>
+                            <p class="text-[11px] text-slate-300">Price breaks Asia High. Retail FOMO long. Rejection wick forms.</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="mt-6 pt-4 border-t border-dark-border text-[11px] text-slate-400">
+                    💡 <em>Heatmap Check: Ensure liquidation clusters are completely swept.</em>
+                </div>
+            </div>
+
+            <!-- Step 3 -->
+            <div class="canva-card rounded-2xl p-6 border-t-4 border-emerald-500 flex flex-col justify-between">
+                <div>
+                    <div class="flex justify-between items-center mb-4">
+                        <span class="w-8 h-8 rounded-full bg-emerald-500/20 text-emerald-400 font-bold flex items-center justify-center font-mono">3</span>
+                        <span class="text-xs font-mono text-slate-400">5M Trigger</span>
+                    </div>
+                    <h3 class="text-lg font-bold text-white mb-2">The Reclaim Trigger</h3>
+                    <p class="text-xs text-slate-300 leading-relaxed mb-4">
+                        Switch to 5M chart. Enter immediately when a 5M candle closes back <strong>INSIDE</strong> the Asia Box.
+                    </p>
+                    <ul class="text-xs text-slate-400 space-y-2 font-mono">
+                        <li class="flex items-center gap-2">
+                            <span class="text-emerald-400">✔</span> Confirm Bullish/Bearish RSI Divergence
+                        </li>
+                        <li class="flex items-center gap-2">
+                            <span class="text-emerald-400">✔</span> Hard SL: 0.2% beyond extreme sweep wick
+                        </li>
+                        <li class="flex items-center gap-2">
+                            <span class="text-emerald-400">✔</span> Targets: 50% Mid (TP1), Opposite Edge (TP2)
+                        </li>
+                    </ul>
+                </div>
+                <div class="mt-6 pt-4 border-t border-dark-border text-[11px] text-slate-400">
+                    💡 <em>If 5M candle fails to close back inside, trade setup is invalidated.</em>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- SECTION 4: BTC RISK GUARDRAILS & POSITION CALCULATOR -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            
+            <!-- BTC Specific Guardrails & Filters -->
+            <div class="canva-card rounded-2xl p-6 space-y-4">
+                <h2 class="text-xl font-bold text-white flex items-center gap-2">
+                    <svg class="w-5 h-5 text-btc" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+                    $BTC Microstructure & Macro Filters
+                </h2>
+
+                <div class="space-y-3 text-xs">
+                    <div class="p-3 bg-dark-bg rounded-xl border border-dark-border flex items-start gap-3">
+                        <div class="p-2 bg-btc/10 text-btc rounded-lg font-bold font-mono">DXY</div>
+                        <div>
+                            <strong class="text-white text-sm block">US Dollar Index (DXY) Correlation</strong>
+                            <p class="text-slate-400 mt-0.5">
+                                • <strong>For BTC Longs:</strong> Abort if DXY is breaking out heavily upward.<br>
+                                • <strong>For BTC Shorts:</strong> Abort if DXY is dumping aggressively downward.
+                            </p>
+                        </div>
+                    </div>
+
+                    <div class="p-3 bg-dark-bg rounded-xl border border-dark-border flex items-start gap-3">
+                        <div class="p-2 bg-red-500/10 text-red-400 rounded-lg font-bold font-mono">CME</div>
+                        <div>
+                            <strong class="text-white text-sm block">Monday CME Weekend Gap Alignment</strong>
+                            <p class="text-slate-400 mt-0.5">
+                                On Monday Asia opens, prioritize liquidity sweeps that align directly with filling open weekend CME Bitcoin futures gaps.
+                            </p>
+                        </div>
+                    </div>
+
+                    <div class="p-3 bg-dark-bg rounded-xl border border-dark-border flex items-start gap-3">
+                        <div class="p-2 bg-amber-500/10 text-amber-400 rounded-lg font-bold font-mono">NEWS</div>
+                        <div>
+                            <strong class="text-white text-sm block">Red Folder Macro News Filter</strong>
+                            <p class="text-slate-400 mt-0.5">
+                                If major US economic data (CPI, FOMC, NFP) releases within 4 hours, Asia technical ranges break easily. <strong>Stay in cash.</strong>
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- BTC Position Risk Calculator -->
+            <div class="canva-card rounded-2xl p-6 flex flex-col justify-between">
+                <div>
+                    <h2 class="text-xl font-bold text-white flex items-center gap-2 mb-1">
+                        <svg class="w-5 h-5 text-btc" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg>
+                        $BTC Position Sizing & Risk Calculator
+                    </h2>
+                    <p class="text-xs text-slate-400 mb-4">Calculate exact position size for the Asia Range Reclaim setup</p>
+
+                    <div class="grid grid-cols-2 gap-3 text-xs mb-4">
+                        <div>
+                            <label class="block text-slate-400 mb-1">Account Balance ($)</label>
+                            <input type="number" id="calc-account" value="10000" class="w-full bg-dark-bg border border-dark-border rounded-lg px-3 py-2 text-white font-mono focus:border-btc focus:outline-none" oninput="calculateRisk()">
+                        </div>
+                        <div>
+                            <label class="block text-slate-400 mb-1">Max Risk per Trade (%)</label>
+                            <input type="number" id="calc-risk" value="1.0" step="0.1" class="w-full bg-dark-bg border border-dark-border rounded-lg px-3 py-2 text-white font-mono focus:border-btc focus:outline-none" oninput="calculateRisk()">
+                        </div>
+                        <div>
+                            <label class="block text-slate-400 mb-1">BTC Entry Price ($)</label>
+                            <input type="number" id="calc-entry" value="65000" class="w-full bg-dark-bg border border-dark-border rounded-lg px-3 py-2 text-white font-mono focus:border-btc focus:outline-none" oninput="calculateRisk()">
+                        </div>
+                        <div>
+                            <label class="block text-slate-400 mb-1">Stop Loss Price ($)</label>
+                            <input type="number" id="calc-sl" value="64675" class="w-full bg-dark-bg border border-dark-border rounded-lg px-3 py-2 text-white font-mono focus:border-btc focus:outline-none" oninput="calculateRisk()">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="p-4 bg-dark-bg rounded-xl border border-dark-border space-y-2 font-mono text-xs">
+                    <div class="flex justify-between">
+                        <span class="text-slate-400">Risk Amount ($):</span>
+                        <span id="res-risk-val" class="text-rose-400 font-bold">$100.00</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-slate-400">Stop Distance (%):</span>
+                        <span id="res-stop-pct" class="text-amber-400 font-bold">0.50%</span>
+                    </div>
+                    <div class="flex justify-between pt-2 border-t border-dark-border text-sm">
+                        <span class="text-slate-200 font-sans font-bold">Recommended Position:</span>
+                        <span id="res-position" class="text-btc font-extrabold">$20,000 (0.307 BTC)</span>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- SECTION 5: INTERACTIVE PRE-TRADE CHECKLIST -->
+        <section class="canva-card rounded-2xl p-6">
+            <div class="flex justify-between items-center mb-4">
+                <div>
+                    <h2 class="text-xl font-bold text-white flex items-center gap-2">
+                        <svg class="w-5 h-5 text-btc" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                        Interactive $BTC Pre-Trade Execution Checklist
+                    </h2>
+                    <p class="text-xs text-slate-400">Verify all 6 execution conditions before entering a market position</p>
+                </div>
+                <button onclick="resetChecklist()" class="text-xs text-slate-400 hover:text-btc underline font-mono">Reset All</button>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+                <label class="flex items-center gap-3 p-3 bg-dark-bg rounded-xl border border-dark-border cursor-pointer hover:border-btc/50 transition">
+                    <input type="checkbox" class="chk-item w-4 h-4 text-btc rounded bg-dark-card border-dark-border focus:ring-btc" onchange="updateChecklist()">
+                    <span id="chk-label-time" class="text-slate-300 text-xs">Is it currently inside the Power Window (10:00 AM – 12:00 PM NZST)?</span>
+                </label>
+
+                <label class="flex items-center gap-3 p-3 bg-dark-bg rounded-xl border border-dark-border cursor-pointer hover:border-btc/50 transition">
+                    <input type="checkbox" class="chk-item w-4 h-4 text-btc rounded bg-dark-card border-dark-border focus:ring-btc" onchange="updateChecklist()">
+                    <span class="text-slate-300 text-xs">Did the 8:15 AM Heatmap confirm high liquidation density at the sweep level?</span>
+                </label>
+
+                <label class="flex items-center gap-3 p-3 bg-dark-bg rounded-xl border border-dark-border cursor-pointer hover:border-btc/50 transition">
+                    <input type="checkbox" class="chk-item w-4 h-4 text-btc rounded bg-dark-card border-dark-border focus:ring-btc" onchange="updateChecklist()">
+                    <span class="text-slate-300 text-xs">Has BTC swept the Asia Box edge AND closed a 5M candle back inside?</span>
+                </label>
+
+                <label class="flex items-center gap-3 p-3 bg-dark-bg rounded-xl border border-dark-border cursor-pointer hover:border-btc/50 transition">
+                    <input type="checkbox" class="chk-item w-4 h-4 text-btc rounded bg-dark-card border-dark-border focus:ring-btc" onchange="updateChecklist()">
+                    <span class="text-slate-300 text-xs">Is RSI demonstrating clear Bullish / Bearish divergence on the 5M chart?</span>
+                </label>
+
+                <label class="flex items-center gap-3 p-3 bg-dark-bg rounded-xl border border-dark-border cursor-pointer hover:border-btc/50 transition">
+                    <input type="checkbox" class="chk-item w-4 h-4 text-btc rounded bg-dark-card border-dark-border focus:ring-btc" onchange="updateChecklist()">
+                    <span class="text-slate-300 text-xs">Is DXY confirming (stalling or moving inverse to trade direction)?</span>
+                </label>
+
+                <label class="flex items-center gap-3 p-3 bg-dark-bg rounded-xl border border-dark-border cursor-pointer hover:border-btc/50 transition">
+                    <input type="checkbox" class="chk-item w-4 h-4 text-btc rounded bg-dark-card border-dark-border focus:ring-btc" onchange="updateChecklist()">
+                    <span class="text-slate-300 text-xs">Is Hard Stop Loss placed 0.2% past the extreme sweep wick point?</span>
+                </label>
+            </div>
+
+            <div class="mt-4 p-3 rounded-xl bg-dark-bg border border-dark-border flex items-center justify-between">
+                <span class="text-xs text-slate-400 font-mono">Execution Safety Engine:</span>
+                <span id="checklist-status" class="text-xs font-bold text-amber-400 font-mono">0 / 6 Rules Verified — WAITING FOR CONFIRMATION</span>
+            </div>
+        </section>
+
+        <!-- FOOTER -->
+        <footer class="text-center text-xs text-slate-500 py-4 font-mono">
+            Bitcoin ($BTC) Asia Range Sweep Playbook • Optimized for NZ Timezones (NZST / NZDT)
+        </footer>
+
+    </div>
+
+    <!-- SCRIPT FOR DYNAMIC LOGIC & INTERACTIVITY -->
+    <script>
+        let currentTZ = 'NZST';
+
+        const scheduleData = {
+            NZST: {
+                label: 'NZST (Winter Time - UTC+12)',
+                usClose: '08:00 AM',
+                report: '08:15 AM',
+                box: '08:00 AM – 10:00 AM',
+                power: '10:00 AM – 12:00 PM',
+                dead: '02:30 PM – 03:30 PM',
+                checkWindow: '10:00 AM – 12:00 PM NZST'
+            },
+            NZDT: {
+                label: 'NZDT (Summer Time - UTC+13)',
+                usClose: '09:00 AM',
+                report: '09:15 AM',
+                box: '09:00 AM – 11:00 AM',
+                power: '11:00 AM – 01:00 PM',
+                dead: '03:30 PM – 04:30 PM',
+                checkWindow: '11:00 AM – 01:00 PM NZDT'
+            }
+        };
+
+        function setTZ(tz) {
+            currentTZ = tz;
+            const data = scheduleData[tz];
+
+            // Update Toggle Button Styles
+            if (tz === 'NZST') {
+                document.getElementById('btn-nzst').className = 'px-3 py-1.5 text-xs font-bold rounded-md bg-btc text-slate-900 transition duration-150';
+                document.getElementById('btn-nzdt').className = 'px-3 py-1.5 text-xs font-bold rounded-md text-slate-400 hover:text-white transition duration-150';
+            } else {
+                document.getElementById('btn-nzdt').className = 'px-3 py-1.5 text-xs font-bold rounded-md bg-btc text-slate-900 transition duration-150';
+                document.getElementById('btn-nzst').className = 'px-3 py-1.5 text-xs font-bold rounded-md text-slate-400 hover:text-white transition duration-150';
+            }
+
+            // Update Header Displays
+            document.getElementById('tz-label-display').innerText = data.label;
+            document.getElementById('tz-current-indicator').innerHTML = `Active Mode: <strong class="text-btc">${data.label}</strong>`;
+
+            // Update Table Hours
+            document.getElementById('time-usclose').innerText = data.usClose;
+            document.getElementById('time-report').innerText = data.report;
+            document.getElementById('time-box').innerText = data.box;
+            document.getElementById('time-power').innerText = data.power;
+            document.getElementById('time-dead').innerText = data.dead;
+
+            // Update Checklist Text
+            document.getElementById('chk-label-time').innerText = `Is it currently inside the Power Window (${data.checkWindow})?`;
+        }
+
+        function calculateRisk() {
+            const balance = parseFloat(document.getElementById('calc-account').value) || 0;
+            const riskPct = parseFloat(document.getElementById('calc-risk').value) || 0;
+            const entry = parseFloat(document.getElementById('calc-entry').value) || 0;
+            const sl = parseFloat(document.getElementById('calc-sl').value) || 0;
+
+            if (entry <= 0 || sl <= 0 || entry === sl) {
+                return;
+            }
+
+            const riskAmount = balance * (riskPct / 100);
+            const stopDistPct = Math.abs((entry - sl) / entry) * 100;
+            const positionVal = riskAmount / (stopDistPct / 100);
+            const btcUnits = positionVal / entry;
+
+            document.getElementById('res-risk-val').innerText = `$${riskAmount.toFixed(2)}`;
+            document.getElementById('res-stop-pct').innerText = `${stopDistPct.toFixed(2)}%`;
+            document.getElementById('res-position').innerText = `$${positionVal.toLocaleString('en-US', {maximumFractionDigits: 0})} (${btcUnits.toFixed(3)} BTC)`;
+        }
+
+        function updateChecklist() {
+            const checkboxes = document.querySelectorAll('.chk-item');
+            let checkedCount = 0;
+            checkboxes.forEach(chk => {
+                if (chk.checked) checkedCount++;
+            });
+
+            const statusEl = document.getElementById('checklist-status');
+            if (checkedCount === 6) {
+                statusEl.className = 'text-xs font-bold text-emerald-400 font-mono animate-pulse';
+                statusEl.innerText = '6 / 6 ALL CONDITIONS MET — READY TO EXECUTE BTC TRADE';
+            } else {
+                statusEl.className = 'text-xs font-bold text-amber-400 font-mono';
+                statusEl.innerText = `${checkedCount} / 6 Rules Verified — WAITING FOR CONFIRMATION`;
+            }
+        }
+
+        function resetChecklist() {
+            const checkboxes = document.querySelectorAll('.chk-item');
+            checkboxes.forEach(chk => chk.checked = false);
+            updateChecklist();
+        }
+
+        // Initialize Calculator on Load
+        calculateRisk();
+    </script>
+</body>
+</html>
