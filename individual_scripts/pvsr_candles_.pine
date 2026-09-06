@@ -1,0 +1,112 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © midnight pickle
+//
+// ============================================================================
+//  PVSR Candles 🌙🥒
+//  PVSRA candle colouring (climax / above-average / regular) + vector alerts.
+//
+//  Split out of "EMA & PVSR Master". Classification logic unchanged.
+//
+//  ⚠️ SHARED CLASSIFICATION: PVSR Candles, PVSR Volume and PVSR Vector Zones
+//  each carry their own copy of the classification inputs and maths. They only
+//  agree with each other if the inputs are set identically in all three.
+// ============================================================================
+
+//@version=6
+indicator("PVSR Candles 🌙🥒", shorttitle="PVSR Candles 🌙🥒", overlay=true)
+
+// ==========================================
+// 🔹 MASTER TOGGLE
+// ==========================================
+
+master_show_pvsr = input.bool(true, title="🔘 MASTER: Show PVSR Candles", group="⚡ MASTER TOGGLES", tooltip="Master toggle for PVSR candle colouring on the price chart")
+
+// --- PVSR Candle Settings ---
+show_pvsr_candles = input.bool(true, title="Show PVSR Candles", group="🕯️ PVSR Candle Settings")
+
+// --- Alert Settings ---
+show_vector_alerts = input.bool(true, title="Show Vector Candle Alerts", group="🔔 Alert Settings")
+
+// ==========================================
+// 🔹 PVSR CLASSIFICATION INPUTS
+// ==========================================
+// ⚠️ SHARED SETTINGS. These must be set identically in PVSR Candles, PVSR
+// Volume and PVSR Vector Zones, or the three will classify the same bar
+// differently and their colours will disagree on the chart.
+
+// Classification thresholds
+climax_mult   = input.float(2.0, title="Climax Volume ×",       minval=1.0, step=0.1, group="🕯️ PVSR Classification (must match across PVSR scripts)", tooltip="Volume ≥ this × average, or a volume-spread high, marks a climax (green/red) candle.")
+aboveavg_mult = input.float(1.5, title="Above-Average Volume ×", minval=1.0, step=0.1, group="🕯️ PVSR Classification (must match across PVSR scripts)", tooltip="Volume ≥ this × average marks an above-average (blue/violet) candle.")
+vol_lookback  = input.int(10,    title="Volume Lookback (bars)", minval=1,            group="🕯️ PVSR Classification (must match across PVSR scripts)", tooltip="Bars used for the average volume and volume-spread high.")
+
+// How the lookback window is measured, and which climax test is active.
+pvsr_exclude_current = input.bool(true, title="Exclude current bar from lookback", group="🕯️ PVSR Classification (must match across PVSR scripts)", tooltip="ON (canonical): the average volume and the volume-spread high are measured over the PREVIOUS N bars, matching the original PVSRA definition. OFF: the current bar sits inside its own comparison window, so an outsized bar raises the very threshold it is being tested against and can suppress its own signal. Turn OFF to reproduce charts drawn before this option existed.")
+pvsr_use_spread_leg  = input.bool(true, title="Use volume × spread climax leg",  group="🕯️ PVSR Classification (must match across PVSR scripts)", tooltip="A bar is climax if volume ≥ climax × average OR volume × range is the highest of the lookback. That second leg fires whenever a bar sets a new lookback high in volume × range, which happens roughly once every N bars regardless of conditions, so it triggers far more often than the volume leg. Turn OFF to see classification driven by volume alone.")
+
+// PVSR Color Settings (shared)
+red_vector_color        = input.color(color.rgb(255, 82, 82),   title="Red Vector Candle",   group="🎨 PVSR Color Settings", inline="pvsrc")
+green_vector_color      = input.color(color.rgb(76, 175, 80),   title="Green Vector Candle", group="🎨 PVSR Color Settings", inline="pvsrc")
+violet_vector_color     = input.color(color.rgb(156, 39, 176),  title="Violet Vector Candle", group="🎨 PVSR Color Settings", inline="pvsrc")
+blue_vector_color       = input.color(color.rgb(33, 150, 243),  title="Blue Vector Candle",  group="🎨 PVSR Color Settings", inline="pvsrc")
+dark_grey_candle_color  = input.color(color.rgb(100, 100, 100), title="Regular Down Candle", group="🎨 PVSR Color Settings", inline="pvsrc")
+light_gray_candle_color = input.color(color.rgb(169, 169, 169), title="Regular Up Candle",   group="🎨 PVSR Color Settings", inline="pvsrc")
+// ==========================================
+// 🔹 PVSR CLASSIFICATION
+// ==========================================
+// ⚠️ This block is duplicated byte-for-byte across PVSR Candles, PVSR Volume
+// and PVSR Vector Zones. The three scripts only agree if the inputs above are
+// set identically in all of them. If candle colours and volume-bar colours
+// ever disagree, the cause is a drifted input, not a bug in the maths.
+
+bool  hasVolume    = not na(volume)
+float volumeSpread = volume * (high - low)
+
+// Canonical PVSRA measures both comparisons over the PREVIOUS vol_lookback
+// bars. With the current bar inside its own window, a large bar drags its own
+// average up and can fail the very test it should pass, and the spread test
+// degenerates into "is this bar the highest of the last N including itself".
+// The [1] offset excludes the current bar from both.
+float averageVolume    = pvsr_exclude_current ? ta.sma(volume, vol_lookback)[1]            : ta.sma(volume, vol_lookback)
+float highestVolSpread = pvsr_exclude_current ? ta.highest(volumeSpread, vol_lookback)[1]  : ta.highest(volumeSpread, vol_lookback)
+
+// Split out so each climax leg can be toggled and read independently. The
+// spread leg fires roughly once every vol_lookback bars by construction, so it
+// dominates the volume leg unless it is switched off.
+bool climaxByVolume = hasVolume and not na(averageVolume)    and volume      >= climax_mult * averageVolume
+bool climaxBySpread = hasVolume and not na(highestVolSpread) and pvsr_use_spread_leg and volumeSpread >= highestVolSpread
+bool aboveAverage   = hasVolume and not na(averageVolume)    and volume      >= aboveavg_mult * averageVolume
+
+color pvsraColor  = na
+int   pvsraCode   = na
+bool  vectorAlert = false
+
+if climaxByVolume or climaxBySpread
+    // Climax
+    pvsraColor := close > open ? green_vector_color : red_vector_color
+    pvsraCode  := close > open ? 3 : -3
+    vectorAlert := true
+else if aboveAverage
+    // Above average
+    pvsraColor := close > open ? blue_vector_color : violet_vector_color
+    pvsraCode  := close > open ? 2 : -2
+    vectorAlert := true
+else
+    // Regular (also the fallback when volume is unavailable, and on the first
+    // vol_lookback bars where the shifted average is not yet defined)
+    pvsraColor := close > open ? light_gray_candle_color : dark_grey_candle_color
+    pvsraCode  := close > open ? 1 : -1
+    vectorAlert := false
+
+// ==========================================
+// 🔹 PLOTTING
+// ==========================================
+
+candleColorToUse = master_show_pvsr and show_pvsr_candles ? pvsraColor : na
+barcolor(candleColorToUse)
+
+// ==========================================
+// 🔹 ALERTS
+// ==========================================
+
+alertcondition(show_vector_alerts and vectorAlert and pvsraCode >= 2, title="Bullish Vector Candle", message="Bullish Vector Candle")
+alertcondition(show_vector_alerts and vectorAlert and pvsraCode <= -2, title="Bearish Vector Candle", message="Bearish Vector Candle")

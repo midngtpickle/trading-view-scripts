@@ -1,0 +1,172 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © midnight pickle
+//
+// ============================================================================
+//  PVSR Vector Zones 🌙🥒
+//  Supply/demand boxes drawn from vector (climax / above-average) candles.
+//    Bullish vector -> demand zone (support, below)
+//    Bearish vector -> supply zone (resistance, above)
+//
+//  Split out of "EMA & PVSR Master". Zone logic unchanged. This script is now
+//  a native overlay, so the force_overlay=true argument box.new() needed while
+//  living in the volume pane has been removed — it is redundant here.
+//
+//  ⚠️ SHARED CLASSIFICATION: PVSR Candles, PVSR Volume and PVSR Vector Zones
+//  each carry their own copy of the classification inputs and maths. They only
+//  agree with each other if the inputs are set identically in all three.
+// ============================================================================
+
+//@version=6
+indicator("PVSR Vector Zones 🌙🥒", shorttitle="Vector Zones 🌙🥒", overlay=true, max_boxes_count=500)
+
+// ==========================================
+// 🔹 MASTER TOGGLE
+// ==========================================
+
+master_show_zones = input.bool(false, title="🔘 MASTER: Show Vector Zones", group="⚡ MASTER TOGGLES", tooltip="Master toggle for vector candle zones")
+
+// --- Vector Zone Settings ---
+show_vector_zones   = input.bool(false, title="Show Vector Candle Zones", group="📦 Vector Zone Settings")
+max_zones           = input.int(20, title="Maximum Zones per Side", minval=1, maxval=50, group="📦 Vector Zone Settings")
+zone_type           = input.string("Body with wicks", title="Zone Extent",   options=["Body with wicks", "Body only"], group="📦 Vector Zone Settings", tooltip="Whether a zone spans the full high/low (wicks) or just the candle body.")
+zone_mitigation     = input.string("Close", title="Zone Mitigation", options=["Close", "Wick"], group="📦 Vector Zone Settings", tooltip="Close: zone is removed when a bar closes through it. Wick: removed as soon as any wick pierces the far edge.")
+zone_transparency   = input.int(80, title="Zone Transparency", minval=0, maxval=100, group="📦 Vector Zone Settings")
+zone_border_width   = input.int(1, title="Zone Border Width", minval=0, maxval=3, group="📦 Vector Zone Settings")
+override_zone_color = input.bool(false, title="Override Zone Color", group="📦 Vector Zone Settings")
+zone_override_color = input.color(color.yellow, title="Override Zone Color", group="📦 Vector Zone Settings")
+
+// ==========================================
+// 🔹 PVSR CLASSIFICATION INPUTS
+// ==========================================
+// ⚠️ SHARED SETTINGS. These must be set identically in PVSR Candles, PVSR
+// Volume and PVSR Vector Zones, or the three will classify the same bar
+// differently and their colours will disagree on the chart.
+
+// Classification thresholds
+climax_mult   = input.float(2.0, title="Climax Volume ×",       minval=1.0, step=0.1, group="🕯️ PVSR Classification (must match across PVSR scripts)", tooltip="Volume ≥ this × average, or a volume-spread high, marks a climax (green/red) candle.")
+aboveavg_mult = input.float(1.5, title="Above-Average Volume ×", minval=1.0, step=0.1, group="🕯️ PVSR Classification (must match across PVSR scripts)", tooltip="Volume ≥ this × average marks an above-average (blue/violet) candle.")
+vol_lookback  = input.int(10,    title="Volume Lookback (bars)", minval=1,            group="🕯️ PVSR Classification (must match across PVSR scripts)", tooltip="Bars used for the average volume and volume-spread high.")
+
+// How the lookback window is measured, and which climax test is active.
+pvsr_exclude_current = input.bool(true, title="Exclude current bar from lookback", group="🕯️ PVSR Classification (must match across PVSR scripts)", tooltip="ON (canonical): the average volume and the volume-spread high are measured over the PREVIOUS N bars, matching the original PVSRA definition. OFF: the current bar sits inside its own comparison window, so an outsized bar raises the very threshold it is being tested against and can suppress its own signal. Turn OFF to reproduce charts drawn before this option existed.")
+pvsr_use_spread_leg  = input.bool(true, title="Use volume × spread climax leg",  group="🕯️ PVSR Classification (must match across PVSR scripts)", tooltip="A bar is climax if volume ≥ climax × average OR volume × range is the highest of the lookback. That second leg fires whenever a bar sets a new lookback high in volume × range, which happens roughly once every N bars regardless of conditions, so it triggers far more often than the volume leg. Turn OFF to see classification driven by volume alone.")
+
+// PVSR Color Settings (shared)
+red_vector_color        = input.color(color.rgb(255, 82, 82),   title="Red Vector Candle",   group="🎨 PVSR Color Settings", inline="pvsrc")
+green_vector_color      = input.color(color.rgb(76, 175, 80),   title="Green Vector Candle", group="🎨 PVSR Color Settings", inline="pvsrc")
+violet_vector_color     = input.color(color.rgb(156, 39, 176),  title="Violet Vector Candle", group="🎨 PVSR Color Settings", inline="pvsrc")
+blue_vector_color       = input.color(color.rgb(33, 150, 243),  title="Blue Vector Candle",  group="🎨 PVSR Color Settings", inline="pvsrc")
+dark_grey_candle_color  = input.color(color.rgb(100, 100, 100), title="Regular Down Candle", group="🎨 PVSR Color Settings", inline="pvsrc")
+light_gray_candle_color = input.color(color.rgb(169, 169, 169), title="Regular Up Candle",   group="🎨 PVSR Color Settings", inline="pvsrc")
+// ==========================================
+// 🔹 PVSR CLASSIFICATION
+// ==========================================
+// ⚠️ This block is duplicated byte-for-byte across PVSR Candles, PVSR Volume
+// and PVSR Vector Zones. The three scripts only agree if the inputs above are
+// set identically in all of them. If candle colours and volume-bar colours
+// ever disagree, the cause is a drifted input, not a bug in the maths.
+
+bool  hasVolume    = not na(volume)
+float volumeSpread = volume * (high - low)
+
+// Canonical PVSRA measures both comparisons over the PREVIOUS vol_lookback
+// bars. With the current bar inside its own window, a large bar drags its own
+// average up and can fail the very test it should pass, and the spread test
+// degenerates into "is this bar the highest of the last N including itself".
+// The [1] offset excludes the current bar from both.
+float averageVolume    = pvsr_exclude_current ? ta.sma(volume, vol_lookback)[1]            : ta.sma(volume, vol_lookback)
+float highestVolSpread = pvsr_exclude_current ? ta.highest(volumeSpread, vol_lookback)[1]  : ta.highest(volumeSpread, vol_lookback)
+
+// Split out so each climax leg can be toggled and read independently. The
+// spread leg fires roughly once every vol_lookback bars by construction, so it
+// dominates the volume leg unless it is switched off.
+bool climaxByVolume = hasVolume and not na(averageVolume)    and volume      >= climax_mult * averageVolume
+bool climaxBySpread = hasVolume and not na(highestVolSpread) and pvsr_use_spread_leg and volumeSpread >= highestVolSpread
+bool aboveAverage   = hasVolume and not na(averageVolume)    and volume      >= aboveavg_mult * averageVolume
+
+color pvsraColor  = na
+int   pvsraCode   = na
+bool  vectorAlert = false
+
+if climaxByVolume or climaxBySpread
+    // Climax
+    pvsraColor := close > open ? green_vector_color : red_vector_color
+    pvsraCode  := close > open ? 3 : -3
+    vectorAlert := true
+else if aboveAverage
+    // Above average
+    pvsraColor := close > open ? blue_vector_color : violet_vector_color
+    pvsraCode  := close > open ? 2 : -2
+    vectorAlert := true
+else
+    // Regular (also the fallback when volume is unavailable, and on the first
+    // vol_lookback bars where the shifted average is not yet defined)
+    pvsraColor := close > open ? light_gray_candle_color : dark_grey_candle_color
+    pvsraCode  := close > open ? 1 : -1
+    vectorAlert := false
+
+// ==========================================
+// 🔹 VECTOR ZONE MANAGEMENT
+//   Bullish vector -> demand zone (belowZones, support)
+//   Bearish vector -> supply zone (aboveZones, resistance)
+// ==========================================
+
+var box[] aboveZones = array.new_box()   // supply
+var box[] belowZones = array.new_box()   // demand
+
+int   trans     = zone_transparency
+color cuColorBG = color.new(green_vector_color,  trans)  // climax up   (demand)
+color cdColorBG = color.new(red_vector_color,    trans)  // climax down (supply)
+color auColorBG = color.new(blue_vector_color,   trans)  // above-avg up   (demand)
+color adColorBG = color.new(violet_vector_color, trans)  // above-avg down (supply)
+
+zoneBgColor(int code) =>
+    override_zone_color ? zone_override_color :
+         code ==  3 ? cuColorBG :
+         code ==  2 ? auColorBG :
+         code == -3 ? cdColorBG :
+         code == -2 ? adColorBG : na
+
+zonesActive     = master_show_zones and show_vector_zones
+useWickExtent   = zone_type == "Body with wicks"
+useWickMitigate = zone_mitigation == "Wick"
+
+// --- 1) Mitigate/clean existing zones FIRST (before any new box exists) ---
+if zonesActive and array.size(aboveZones) > 0
+    for i = array.size(aboveZones) - 1 to 0
+        box b = array.get(aboveZones, i)
+        float bTop = box.get_top(b)
+        bool mitigated = useWickMitigate ? high > bTop : close > bTop
+        if mitigated
+            box.delete(b)
+            array.remove(aboveZones, i)
+
+if zonesActive and array.size(belowZones) > 0
+    for i = array.size(belowZones) - 1 to 0
+        box b = array.get(belowZones, i)
+        float bBottom = box.get_bottom(b)
+        bool mitigated = useWickMitigate ? low < bBottom : close < bBottom
+        if mitigated
+            box.delete(b)
+            array.remove(belowZones, i)
+
+// --- 2) Create a new zone for this bar's vector candle (if any) ---
+if zonesActive and (pvsraCode <= -2 or pvsraCode >= 2)
+    float top    = useWickExtent ? high : math.max(open, close)
+    float bottom = useWickExtent ? low  : math.min(open, close)
+    color bg     = zoneBgColor(pvsraCode)
+    box nb = box.new(left=bar_index, top=top, right=bar_index, bottom=bottom,
+                     extend=extend.right, bgcolor=bg, border_width=zone_border_width,
+                     border_color=color.new(color.white, 80))
+    if pvsraCode >= 2
+        array.unshift(belowZones, nb)   // bullish -> demand
+    else
+        array.unshift(aboveZones, nb)   // bearish -> supply
+
+// --- 3) Enforce the per-side cap (drop the oldest = last element) ---
+if array.size(aboveZones) > max_zones
+    box old = array.pop(aboveZones)
+    box.delete(old)
+if array.size(belowZones) > max_zones
+    box old = array.pop(belowZones)
+    box.delete(old)

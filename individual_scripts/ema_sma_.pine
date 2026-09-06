@@ -1,0 +1,145 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © midnight pickle
+//
+// ============================================================================
+//  EMA / SMA 🌙🥒
+//  Six EMAs, three SMAs, VWAP, and golden/death cross labels for both.
+//
+//  Split out of "EMA & PVSR Master". Logic unchanged. This script is now a
+//  native overlay, so the force_overlay=true arguments that the plots needed
+//  while living in the volume pane have been removed — plots land on the price
+//  chart directly.
+// ============================================================================
+
+//@version=6
+indicator("EMA / SMA 🌙🥒", shorttitle="EMA/SMA 🌙🥒", overlay=true)
+
+// ==========================================
+// 🔹 MASTER TOGGLE - QUICK ACCESS
+// ==========================================
+
+master_show_ema       = input.bool(true,  title="🔘 MASTER: Show EMAs",            group="⚡ MASTER TOGGLES", tooltip="Master toggle for all EMAs")
+master_show_ema_cross = input.bool(true,  title="🔘 MASTER: Show EMA Cross Labels", group="⚡ MASTER TOGGLES", tooltip="Master toggle for EMA crossover labels")
+master_show_sma       = input.bool(true,  title="🔘 MASTER: Show SMAs",            group="⚡ MASTER TOGGLES", tooltip="Master toggle for all SMAs")
+master_show_sma_cross = input.bool(true,  title="🔘 MASTER: Show SMA Cross Labels", group="⚡ MASTER TOGGLES", tooltip="Master toggle for SMA crossover labels")
+master_show_vwap      = input.bool(true,  title="🔘 MASTER: Show VWAP",            group="⚡ MASTER TOGGLES", tooltip="Master toggle for VWAP")
+
+// ==========================================
+// 🔹 INPUT MENU - EMA/SMA/VWAP SECTION
+// ==========================================
+
+// --- EMA Individual Settings ---
+show_ema1 = input.bool(true, title="Show EMA 1", inline="e1", group="📈 EMA Settings")
+len_ema1  = input.int(10,  title="", inline="e1", group="📈 EMA Settings")
+col_ema1  = input.color(color.orange, title="", inline="e1", group="📈 EMA Settings")
+
+show_ema2 = input.bool(true, title="Show EMA 2", inline="e2", group="📈 EMA Settings")
+len_ema2  = input.int(21,  title="", inline="e2", group="📈 EMA Settings")
+col_ema2  = input.color(color.green,  title="", inline="e2", group="📈 EMA Settings")
+
+show_ema3 = input.bool(true, title="Show EMA 3", inline="e3", group="📈 EMA Settings")
+len_ema3  = input.int(50,  title="", inline="e3", group="📈 EMA Settings")
+col_ema3  = input.color(color.blue,   title="", inline="e3", group="📈 EMA Settings")
+
+show_ema4 = input.bool(true, title="Show EMA 4", inline="e4", group="📈 EMA Settings")
+len_ema4  = input.int(100, title="", inline="e4", group="📈 EMA Settings")
+col_ema4  = input.color(color.gray,   title="", inline="e4", group="📈 EMA Settings")
+
+show_ema5 = input.bool(true, title="Show EMA 5", inline="e5", group="📈 EMA Settings")
+len_ema5  = input.int(200, title="", inline="e5", group="📈 EMA Settings")
+col_ema5  = input.color(color.purple, title="", inline="e5", group="📈 EMA Settings")
+
+show_ema6 = input.bool(true, title="Show EMA 6", inline="e6", group="📈 EMA Settings")
+len_ema6  = input.int(800, title="", inline="e6", group="📈 EMA Settings")
+col_ema6  = input.color(color.red,    title="", inline="e6", group="📈 EMA Settings")
+
+// --- EMA Crossover Settings ---
+show_ema_cross_labels = input.bool(true, title="Show EMA Cross Labels", group="🔄 EMA Crossover Settings")
+len_ema_cross_fast    = input.int(9,  title="Fast Length", group="🔄 EMA Crossover Settings")
+len_ema_cross_slow    = input.int(21, title="Slow Length", group="🔄 EMA Crossover Settings")
+
+// --- SMA Individual Settings ---
+show_sma1 = input.bool(true, title="Show SMA 1", inline="s1", group="📊 SMA Settings")
+len_sma1  = input.int(50,  title="", inline="s1", group="📊 SMA Settings")
+col_sma1  = input.color(color.purple,  title="", inline="s1", group="📊 SMA Settings")
+
+show_sma2 = input.bool(true, title="Show SMA 2", inline="s2", group="📊 SMA Settings")
+len_sma2  = input.int(100, title="", inline="s2", group="📊 SMA Settings")
+col_sma2  = input.color(color.fuchsia, title="", inline="s2", group="📊 SMA Settings")
+
+show_sma3 = input.bool(true, title="Show SMA 3", inline="s3", group="📊 SMA Settings")
+len_sma3  = input.int(200, title="", inline="s3", group="📊 SMA Settings")
+col_sma3  = input.color(color.navy,    title="", inline="s3", group="📊 SMA Settings")
+
+// --- SMA Crossover Settings ---
+show_sma_cross_labels = input.bool(true, title="Show SMA Cross Labels", group="🔄 SMA Crossover Settings")
+len_sma_cross_fast    = input.int(50,  title="Fast Length", group="🔄 SMA Crossover Settings")
+len_sma_cross_slow    = input.int(200, title="Slow Length", group="🔄 SMA Crossover Settings")
+
+// --- VWAP Settings ---
+show_vwap = input.bool(true, title="Show VWAP", group="📉 VWAP Settings")
+col_vwap  = input.color(color.orange, title="VWAP Color", group="📉 VWAP Settings")
+wid_vwap  = input.int(2, title="VWAP Width", minval=1, group="📉 VWAP Settings")
+
+// ==========================================
+// 🔹 CALCULATIONS - EMA/SMA/VWAP
+// ==========================================
+
+ema1 = ta.ema(close, len_ema1)
+ema2 = ta.ema(close, len_ema2)
+ema3 = ta.ema(close, len_ema3)
+ema4 = ta.ema(close, len_ema4)
+ema5 = ta.ema(close, len_ema5)
+ema6 = ta.ema(close, len_ema6)
+
+ema_c_fast = ta.ema(close, len_ema_cross_fast)
+ema_c_slow = ta.ema(close, len_ema_cross_slow)
+ema_golden = ta.crossover(ema_c_fast, ema_c_slow)
+ema_death  = ta.crossunder(ema_c_fast, ema_c_slow)
+
+sma1 = ta.sma(close, len_sma1)
+sma2 = ta.sma(close, len_sma2)
+sma3 = ta.sma(close, len_sma3)
+
+sma_c_fast   = ta.sma(close, len_sma_cross_fast)
+sma_c_slow   = ta.sma(close, len_sma_cross_slow)
+golden_cross = ta.crossover(sma_c_fast, sma_c_slow)
+death_cross  = ta.crossunder(sma_c_fast, sma_c_slow)
+
+vwap_value = ta.vwap(close)
+
+// ==========================================
+// 🔹 PLOTTING
+// ==========================================
+
+plot(master_show_ema and show_ema1 ? ema1 : na, title='EMA 1 (10)',  color=col_ema1, linewidth=1)
+plot(master_show_ema and show_ema2 ? ema2 : na, title='EMA 2 (21)',  color=col_ema2, linewidth=1)
+plot(master_show_ema and show_ema3 ? ema3 : na, title='EMA 3 (50)',  color=col_ema3, linewidth=1)
+plot(master_show_ema and show_ema4 ? ema4 : na, title='EMA 4 (100)', color=col_ema4, linewidth=1)
+plot(master_show_ema and show_ema5 ? ema5 : na, title='EMA 5 (200)', color=col_ema5, linewidth=1)
+plot(master_show_ema and show_ema6 ? ema6 : na, title='EMA 6 (800)', color=col_ema6, linewidth=1)
+
+plot(master_show_sma and show_sma1 ? sma1 : na, title='SMA 1 (50)',  color=col_sma1, linewidth=2)
+plot(master_show_sma and show_sma2 ? sma2 : na, title='SMA 2 (100)', color=col_sma2, linewidth=2)
+plot(master_show_sma and show_sma3 ? sma3 : na, title='SMA 3 (200)', color=col_sma3, linewidth=2)
+
+plot(master_show_vwap and show_vwap ? vwap_value : na, title="VWAP", color=col_vwap, linewidth=wid_vwap)
+
+plotshape(master_show_sma_cross and show_sma_cross_labels and golden_cross, title='SMA Golden Cross', style=shape.triangleup,
+         location=location.belowbar, color=color.green, text='SMA GOLD', textcolor=color.rgb(255, 255, 255), size=size.small)
+plotshape(master_show_sma_cross and show_sma_cross_labels and death_cross, title='SMA Death Cross', style=shape.triangledown,
+         location=location.abovebar, color=color.red, text='SMA DEATH', textcolor=color.white, size=size.small)
+plotshape(master_show_ema_cross and show_ema_cross_labels and ema_golden, title='EMA Golden Cross', style=shape.triangleup,
+         location=location.belowbar, color=color.green, text='EMA GOLD', textcolor=color.rgb(255, 255, 255), size=size.small)
+plotshape(master_show_ema_cross and show_ema_cross_labels and ema_death, title='EMA Death Cross', style=shape.triangledown,
+         location=location.abovebar, color=color.red, text='EMA DEATH', textcolor=color.white, size=size.small)
+
+// ==========================================
+// 🔹 ALERTS
+// ==========================================
+
+alertcondition(ema_golden, title="EMA Golden Cross", message="EMA Bullish Cross")
+alertcondition(ema_death,  title="EMA Death Cross",  message="EMA Bearish Cross")
+alertcondition(golden_cross, title="SMA Golden Cross", message="SMA Bullish Cross")
+alertcondition(death_cross,  title="SMA Death Cross",  message="SMA Bearish Cross")
+alertcondition(ta.cross(close, vwap_value), title="Price Cross VWAP", message="Price crossed VWAP")

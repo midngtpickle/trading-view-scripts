@@ -1,0 +1,338 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © midnight pickle
+//
+// ============================================================================
+//  Key Levels 🌙🥒
+//  Monday range, D/W/M/Y highs, lows, mids, opens — with smart level merging
+//
+//  Split out of the "Pivots + Key Levels" master script. Logic is unchanged;
+//  the Pivots half now lives in its own indicator, so this script has the full
+//  500-line / 500-label object budget to itself.
+// ============================================================================
+
+//@version=6
+indicator('Key Levels 🌙🥒', shorttitle='Key Levels 🌙🥒', overlay=true, max_lines_count=500, max_labels_count=500, max_bars_back=5000)
+
+// ============================================================================
+// ██ KEY LEVELS ██
+// ============================================================================
+
+// 🔹 STYLE CONSTANTS
+opt_solid = 'Solid'
+opt_dashed = 'Dashed'
+opt_dotted = 'Dotted'
+
+// Helper function to convert string to line style
+get_line_style(style_str) =>
+    style_str == opt_dashed ? line.style_dashed : style_str == opt_dotted ? line.style_dotted : line.style_solid
+
+// 🔹 MASTER CONTROLS
+grp_master = '🎯 Key Levels · Master Controls'
+
+master_key = input.bool(true, '🔥 Master Toggle: All Key Levels', group=grp_master)
+
+master_key_col_on = input.bool(false, '🎨 Use Single Master Color', group=grp_master, inline='mkc')
+master_key_col = input.color(color.white, '', group=grp_master, inline='mkc')
+
+master_key_style_on = input.bool(false, '〰️ Use Single Master Style', group=grp_master, inline='mks')
+master_key_style = input.string(opt_solid, '', options=[opt_solid, opt_dashed, opt_dotted], group=grp_master, inline='mks')
+
+master_key_width_on = input.bool(false, '📏 Use Single Master Width', group=grp_master, inline='mkw')
+master_key_width = input.int(1, '', minval=1, maxval=10, group=grp_master, inline='mkw')
+
+// Line length + merge tolerance (defaults preserve prior behavior)
+line_len = input.int(10, 'Line Length (bars)', minval=1, group=grp_master)
+merge_ticks = input.float(2, 'Merge Tolerance (ticks)', minval=0, group=grp_master, tooltip='Two levels closer than this many ticks are merged onto one line.')
+
+// 🔹 MONDAY RANGE
+grp_mon = '📅 Key Levels · Monday Range'
+
+show_mon = input.bool(true, 'Show Monday Range (H/L/O)', group=grp_mon)
+col_mon = input.color(color.new(color.teal, 30), 'Color', group=grp_mon, inline='m1')
+style_mon = input.string(opt_solid, 'Style', options=[opt_solid, opt_dashed, opt_dotted], group=grp_mon, inline='m1')
+width_mon = input.int(1, 'Width', minval=1, maxval=10, group=grp_mon, inline='m1')
+
+// 🔹 DAILY LEVELS
+grp_daily = '📆 Key Levels · Daily'
+
+show_do = input.bool(true, 'Show Daily Open', group=grp_daily)
+show_pd = input.bool(true, 'Show Previous Day H/L', group=grp_daily)
+show_pd_mid = input.bool(true, 'Show Previous Day 50%', group=grp_daily)
+col_pd = input.color(color.new(color.gray, 30), 'Color', group=grp_daily, inline='d1')
+style_pd = input.string(opt_solid, 'Style', options=[opt_solid, opt_dashed, opt_dotted], group=grp_daily, inline='d1')
+width_pd = input.int(1, 'Width', minval=1, maxval=10, group=grp_daily, inline='d1')
+
+// 🔹 WEEKLY LEVELS
+grp_weekly = '📊 Key Levels · Weekly'
+
+show_cw = input.bool(true, 'Show Current Week H/L', group=grp_weekly)
+show_cw_mid = input.bool(true, 'Show Current Week 50%', group=grp_weekly)
+col_cw = input.color(color.new(color.orange, 10), 'CW Color', group=grp_weekly, inline='w1')
+style_cw = input.string(opt_solid, 'Style', options=[opt_solid, opt_dashed, opt_dotted], group=grp_weekly, inline='w1')
+width_cw = input.int(2, 'Width', minval=1, maxval=10, group=grp_weekly, inline='w1')
+
+show_pw = input.bool(true, 'Show Previous Week H/L', group=grp_weekly)
+show_pw_mid = input.bool(true, 'Show Previous Week 50%', group=grp_weekly)
+col_pw = input.color(color.new(color.orange, 30), 'PW Color', group=grp_weekly, inline='w2')
+style_pw = input.string(opt_solid, 'Style', options=[opt_solid, opt_dashed, opt_dotted], group=grp_weekly, inline='w2')
+width_pw = input.int(2, 'Width', minval=1, maxval=10, group=grp_weekly, inline='w2')
+
+// 🔹 MONTHLY LEVELS
+grp_monthly = '📈 Key Levels · Monthly'
+
+show_cm = input.bool(true, 'Show Current Month H/L', group=grp_monthly)
+show_cm_mid = input.bool(true, 'Show Current Month 50%', group=grp_monthly)
+col_cm = input.color(color.new(color.red, 10), 'CM Color', group=grp_monthly, inline='mo1')
+style_cm = input.string(opt_solid, 'Style', options=[opt_solid, opt_dashed, opt_dotted], group=grp_monthly, inline='mo1')
+width_cm = input.int(2, 'Width', minval=1, maxval=10, group=grp_monthly, inline='mo1')
+
+show_pm = input.bool(true, 'Show Previous Month H/L', group=grp_monthly)
+show_pm_mid = input.bool(true, 'Show Previous Month 50%', group=grp_monthly)
+col_pm = input.color(color.new(color.red, 30), 'PM Color', group=grp_monthly, inline='mo2')
+style_pm = input.string(opt_solid, 'Style', options=[opt_solid, opt_dashed, opt_dotted], group=grp_monthly, inline='mo2')
+width_pm = input.int(2, 'Width', minval=1, maxval=10, group=grp_monthly, inline='mo2')
+
+// 🔹 YEARLY LEVELS
+grp_yearly = '📅 Key Levels · Yearly'
+
+show_cy = input.bool(true, 'Show Current Year H/L', group=grp_yearly)
+show_cy_mid = input.bool(true, 'Show Current Year 50%', group=grp_yearly)
+show_cy_open = input.bool(true, 'Show Current Year Open', group=grp_yearly)
+col_cy = input.color(color.new(color.maroon, 10), 'CY Color', group=grp_yearly, inline='y1')
+style_cy = input.string(opt_solid, 'Style', options=[opt_solid, opt_dashed, opt_dotted], group=grp_yearly, inline='y1')
+width_cy = input.int(3, 'Width', minval=1, maxval=10, group=grp_yearly, inline='y1')
+
+show_py = input.bool(true, 'Show Previous Year H/L', group=grp_yearly)
+show_py_mid = input.bool(true, 'Show Previous Year 50%', group=grp_yearly)
+col_py = input.color(color.new(color.maroon, 30), 'PY Color', group=grp_yearly, inline='y2')
+style_py = input.string(opt_solid, 'Style', options=[opt_solid, opt_dashed, opt_dotted], group=grp_yearly, inline='y2')
+width_py = input.int(3, 'Width', minval=1, maxval=10, group=grp_yearly, inline='y2')
+
+// 🔹 KEY LEVELS LOGIC
+
+// 1. Fetch Data
+// "previous period" levels use [1] + lookahead_on (confirmed prior period, non-repainting).
+// "current period" levels use no-offset + lookahead_off (developing period, updates live by design).
+//
+// WHY THE CURRENT-PERIOD PATTERN IS CORRECT HERE, AND WHERE IT IS NOT.
+// request.security(..., lookahead_off) with no offset returns two different
+// things depending on the bar: on a HISTORICAL bar it returns the last CLOSED
+// higher-timeframe value (so mid-week it hands back last week's high), and on
+// a REALTIME bar it returns the live developing value.
+//
+// That is fine in this script because every key level is drawn inside
+// `if master_key and barstate.islast` — only the realtime bar is ever read, so
+// only the developing value is ever displayed. Two caveats follow from that:
+//   * In bar-replay, barstate.islast is a historical bar, so the "current"
+//     week/month/year lines will show the PREVIOUS period's extreme.
+//   * Do not reuse these variables in an alertcondition, or port them into a
+//     strategy. There the historical path is evaluated on every bar and the
+//     backtest silently trades a different series than the live script.
+//
+// Computing these natively with a timeframe.change() reset (the way the Monday
+// range below is built) would fix the replay case, but it would BREAK the
+// monthly and yearly levels on intraday charts: native accumulation only sees
+// the bars actually loaded, which on a 5m chart is a few weeks, not a year.
+// request.security is the right tool for deep periods; the constraint is that
+// its result is only trustworthy on the last bar.
+
+// --- Daily ---
+d_o = request.security(syminfo.tickerid, 'D', open, lookahead=barmerge.lookahead_off)
+[d_h, d_l] = request.security(syminfo.tickerid, 'D', [high[1], low[1]], lookahead=barmerge.lookahead_on)
+d_mid = (d_h + d_l) / 2
+
+// --- Weekly ---
+[cw_h, cw_l] = request.security(syminfo.tickerid, 'W', [high, low], lookahead=barmerge.lookahead_off)
+cw_mid = (cw_h + cw_l) / 2
+[w_h, w_l] = request.security(syminfo.tickerid, 'W', [high[1], low[1]], lookahead=barmerge.lookahead_on)
+w_mid = (w_h + w_l) / 2
+
+// --- Monthly ---
+[cm_h, cm_l] = request.security(syminfo.tickerid, 'M', [high, low], lookahead=barmerge.lookahead_off)
+cm_mid = (cm_h + cm_l) / 2
+[m_h, m_l] = request.security(syminfo.tickerid, 'M', [high[1], low[1]], lookahead=barmerge.lookahead_on)
+m_mid = (m_h + m_l) / 2
+
+// --- Yearly ---
+[cy_h, cy_l, cy_o] = request.security(syminfo.tickerid, '12M', [high, low, open], lookahead=barmerge.lookahead_off)
+cy_mid = (cy_h + cy_l) / 2
+[py_h, py_l] = request.security(syminfo.tickerid, '12M', [high[1], low[1]], lookahead=barmerge.lookahead_on)
+py_mid = (py_h + py_l) / 2
+
+// 2. Monday Logic
+var float mon_h = na
+var float mon_l = na
+var float mon_o = na
+var bool mon_active = false
+
+is_new_week = ta.change(time('W')) != 0
+
+if is_new_week
+    mon_h := na
+    mon_l := na
+    mon_o := na
+    mon_active := false
+
+is_monday = dayofweek == dayofweek.monday
+
+if is_monday
+    if not mon_active
+        mon_h := high
+        mon_l := low
+        mon_o := open
+        mon_active := true
+    else
+        mon_h := math.max(mon_h, high)
+        mon_l := math.min(mon_l, low)
+
+// 3. Draw Active Key Levels (Smart Aggregation Engine)
+var active_key_lines = array.new_line()
+var active_key_labels = array.new_label()
+
+format_price(price) =>
+    if syminfo.mintick < 0.00001
+        str.tostring(price, "#.#####")
+    else if syminfo.mintick < 0.0001
+        str.tostring(price, "#.####")
+    else if syminfo.mintick < 0.001
+        str.tostring(price, "#.###")
+    else if syminfo.mintick < 0.01
+        str.tostring(price, "#.##")
+    else if syminfo.mintick < 0.1
+        str.tostring(price, "#.#")
+    else
+        str.tostring(math.round(price))
+
+merge_or_add_level(prices, names, colors, widths, styles, show, price, name, col, w, s) =>
+    if show and not na(price)
+        idx = -1
+        if array.size(prices) > 0
+            for i = 0 to array.size(prices) - 1
+                if math.abs(array.get(prices, i) - price) <= (syminfo.mintick * merge_ticks)
+                    idx := i
+                    break
+        if idx != -1
+            existing_name = array.get(names, idx)
+            array.set(names, idx, existing_name + "  |  " + name)
+        else
+            array.push(prices, price)
+            array.push(names, name)
+            array.push(colors, col)
+            array.push(widths, w)
+            array.push(styles, s)
+
+if master_key and barstate.islast
+    // Clean up previous tick's drawings
+    if array.size(active_key_lines) > 0
+        for i = 0 to array.size(active_key_lines) - 1
+            line.delete(array.get(active_key_lines, i))
+            label.delete(array.get(active_key_labels, i))
+        array.clear(active_key_lines)
+        array.clear(active_key_labels)
+
+    // Temporary arrays to hold aggregated levels for this tick
+    prices = array.new_float()
+    names = array.new_string()
+    colors = array.new_color()
+    widths = array.new_int()
+    styles = array.new_string()
+
+    // Determine values based on master toggles
+    c_mon = master_key_col_on ? master_key_col : col_mon
+    s_mon = master_key_style_on ? master_key_style : style_mon
+    w_mon = master_key_width_on ? master_key_width : width_mon
+
+    c_pd = master_key_col_on ? master_key_col : col_pd
+    s_pd = master_key_style_on ? master_key_style : style_pd
+    w_pd = master_key_width_on ? master_key_width : width_pd
+
+    c_cw = master_key_col_on ? master_key_col : col_cw
+    s_cw = master_key_style_on ? master_key_style : style_cw
+    w_cw = master_key_width_on ? master_key_width : width_cw
+
+    c_pw = master_key_col_on ? master_key_col : col_pw
+    s_pw = master_key_style_on ? master_key_style : style_pw
+    w_pw = master_key_width_on ? master_key_width : width_pw
+
+    c_cm = master_key_col_on ? master_key_col : col_cm
+    s_cm = master_key_style_on ? master_key_style : style_cm
+    w_cm = master_key_width_on ? master_key_width : width_cm
+
+    c_pm = master_key_col_on ? master_key_col : col_pm
+    s_pm = master_key_style_on ? master_key_style : style_pm
+    w_pm = master_key_width_on ? master_key_width : width_pm
+
+    c_cy = master_key_col_on ? master_key_col : col_cy
+    s_cy = master_key_style_on ? master_key_style : style_cy
+    w_cy = master_key_width_on ? master_key_width : width_cy
+
+    c_py = master_key_col_on ? master_key_col : col_py
+    s_py = master_key_style_on ? master_key_style : style_py
+    w_py = master_key_width_on ? master_key_width : width_py
+
+    // Add levels in order: Shortest timeframe → Longest timeframe
+    // NOTE (design): first level added at a coinciding price keeps its style/color/width;
+    // later ones only append their name. So shorter timeframes win styling on overlap.
+    // To make the higher timeframe dominate, reverse the add order below.
+
+    // Monday Range
+    merge_or_add_level(prices, names, colors, widths, styles, show_mon, mon_h, "Mon H", c_mon, w_mon, s_mon)
+    merge_or_add_level(prices, names, colors, widths, styles, show_mon, mon_l, "Mon L", c_mon, w_mon, s_mon)
+    merge_or_add_level(prices, names, colors, widths, styles, show_mon, mon_o, "Mon O", c_mon, w_mon, s_mon)
+
+    // Daily Levels
+    merge_or_add_level(prices, names, colors, widths, styles, show_do, d_o, "D Open", c_pd, w_pd, s_pd)
+    merge_or_add_level(prices, names, colors, widths, styles, show_pd, d_h, "PDH", c_pd, w_pd, s_pd)
+    merge_or_add_level(prices, names, colors, widths, styles, show_pd, d_l, "PDL", c_pd, w_pd, s_pd)
+    merge_or_add_level(prices, names, colors, widths, styles, show_pd_mid, d_mid, "PD 50%", c_pd, w_pd, s_pd)
+
+    // Current Weekly Levels
+    merge_or_add_level(prices, names, colors, widths, styles, show_cw, cw_h, "CW High", c_cw, w_cw, s_cw)
+    merge_or_add_level(prices, names, colors, widths, styles, show_cw, cw_l, "CW Low", c_cw, w_cw, s_cw)
+    merge_or_add_level(prices, names, colors, widths, styles, show_cw_mid, cw_mid, "CW 50%", c_cw, w_cw, s_cw)
+
+    // Previous Weekly Levels
+    merge_or_add_level(prices, names, colors, widths, styles, show_pw, w_h, "PWH", c_pw, w_pw, s_pw)
+    merge_or_add_level(prices, names, colors, widths, styles, show_pw, w_l, "PWL", c_pw, w_pw, s_pw)
+    merge_or_add_level(prices, names, colors, widths, styles, show_pw_mid, w_mid, "PW 50%", c_pw, w_pw, s_pw)
+
+    // Current Monthly Levels
+    merge_or_add_level(prices, names, colors, widths, styles, show_cm, cm_h, "CM High", c_cm, w_cm, s_cm)
+    merge_or_add_level(prices, names, colors, widths, styles, show_cm, cm_l, "CM Low", c_cm, w_cm, s_cm)
+    merge_or_add_level(prices, names, colors, widths, styles, show_cm_mid, cm_mid, "CM 50%", c_cm, w_cm, s_cm)
+
+    // Previous Monthly Levels
+    merge_or_add_level(prices, names, colors, widths, styles, show_pm, m_h, "PMH", c_pm, w_pm, s_pm)
+    merge_or_add_level(prices, names, colors, widths, styles, show_pm, m_l, "PML", c_pm, w_pm, s_pm)
+    merge_or_add_level(prices, names, colors, widths, styles, show_pm_mid, m_mid, "PM 50%", c_pm, w_pm, s_pm)
+
+    // Current Yearly Levels
+    merge_or_add_level(prices, names, colors, widths, styles, show_cy, cy_h, "CY High", c_cy, w_cy, s_cy)
+    merge_or_add_level(prices, names, colors, widths, styles, show_cy, cy_l, "CY Low", c_cy, w_cy, s_cy)
+    merge_or_add_level(prices, names, colors, widths, styles, show_cy_mid, cy_mid, "CY 50%", c_cy, w_cy, s_cy)
+    merge_or_add_level(prices, names, colors, widths, styles, show_cy_open, cy_o, "CY Open", c_cy, w_cy, s_cy)
+
+    // Previous Yearly Levels
+    merge_or_add_level(prices, names, colors, widths, styles, show_py, py_h, "PYH", c_py, w_py, s_py)
+    merge_or_add_level(prices, names, colors, widths, styles, show_py, py_l, "PYL", c_py, w_py, s_py)
+    merge_or_add_level(prices, names, colors, widths, styles, show_py_mid, py_mid, "PY 50%", c_py, w_py, s_py)
+
+    // Draw the newly merged levels onto the chart (lines extend `line_len` bars)
+    if array.size(prices) > 0
+        for i = 0 to array.size(prices) - 1
+            lvl_p = array.get(prices, i)
+            n = array.get(names, i)
+            c = array.get(colors, i)
+            w = array.get(widths, i)
+            s_str = array.get(styles, i)
+
+            line_style = get_line_style(s_str)
+
+            price_formatted = format_price(lvl_p)
+            label_text = n + "  (" + price_formatted + ")"
+
+            ln = line.new(bar_index, lvl_p, bar_index + line_len, lvl_p, color=c, width=w, style=line_style)
+            lb = label.new(bar_index + line_len, lvl_p, label_text, color=na, textcolor=c, style=label.style_label_left, size=size.small)
+
+            array.push(active_key_lines, ln)
+            array.push(active_key_labels, lb)

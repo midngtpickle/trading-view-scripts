@@ -1,0 +1,164 @@
+//@version=6
+// RSI Divergence Indicator — hardened fork of the TradingView built-in
+// Midnight Pickle build. Changes vs. the original are tagged [MP].
+// NOTE: no `timeframe=` argument — Pine forbids it alongside side-effect calls
+// (alert(), line.new()). Use the chart timeframe. [MP]
+indicator(title="RSI Divergence Indicator MP", shorttitle="RSI Div MP", format=format.price, precision=2, max_lines_count=500)
+
+// ── Inputs ────────────────────────────────────────────────────────────────────
+gR = "RSI"
+len = input.int(14, "RSI Period", minval=1, group=gR)
+src = input.source(close, "RSI Source", group=gR)                                   // [MP] typed source input
+
+gP = "Pivots"
+lbR = input.int(5, "Pivot Lookback Right", minval=1, group=gP)                      // [MP] minval guard
+lbL = input.int(5, "Pivot Lookback Left", minval=1, group=gP)                       // [MP] minval guard
+rangeUpper = input.int(60, "Max of Lookback Range", minval=1, group=gP)
+rangeLower = input.int(5, "Min of Lookback Range", minval=1, group=gP)
+usePriceExtreme = input.bool(false, "Use true swing extreme for price", group=gP,
+     tooltip="Off = original behaviour: compares price at the RSI pivot bar. On = compares the actual high/low of the swing window, which is closer to what you see on the chart.")  // [MP]
+
+gF = "Filters"
+confirmOnClose = input.bool(true, "Confirm on bar close", group=gF,
+     tooltip="Pivot detection includes the live bar, so signals can appear and vanish intrabar. On = only draw/alert once the bar closes.")                                        // [MP]
+useZone = input.bool(false, "Require RSI pivot inside zone (regular div only)", group=gF)  // [MP]
+bullZone = input.float(40, "Bull: RSI pivot at or below", minval=0, maxval=100, group=gF)
+bearZone = input.float(60, "Bear: RSI pivot at or above", minval=0, maxval=100, group=gF)
+minOscDelta = input.float(0, "Min RSI difference between pivots", minval=0, step=0.5, group=gF,
+     tooltip="Rejects near-flat divergences. 3-5 is a reasonable starting point on low timeframes.")  // [MP]
+
+gD = "Display"
+plotBull = input.bool(true, "Plot Bullish", group=gD, display=display.none)
+plotHiddenBull = input.bool(false, "Plot Hidden Bullish", group=gD, display=display.none)
+plotBear = input.bool(true, "Plot Bearish", group=gD, display=display.none)
+plotHiddenBear = input.bool(false, "Plot Hidden Bearish", group=gD, display=display.none)
+showPriceLines = input.bool(false, "Draw divergence lines on price chart", group=gD)  // [MP]
+
+bearColor = color.red
+bullColor = color.green
+hiddenBullColor = color.new(color.green, 80)
+hiddenBearColor = color.new(color.red, 80)
+textColor = color.white
+noneColor = color.new(color.white, 100)
+
+// ── Oscillator ────────────────────────────────────────────────────────────────
+osc = ta.rsi(src, len)
+
+plot(osc, title="RSI", linewidth=2, color=#2962FF)
+hline(50, title="Middle Line", color=#787B86, linestyle=hline.style_dotted)
+obLevel = hline(70, title="Overbought", color=#787B86, linestyle=hline.style_dotted)
+osLevel = hline(30, title="Oversold", color=#787B86, linestyle=hline.style_dotted)
+fill(obLevel, osLevel, title="Background", color=color.rgb(33, 150, 243, 90))
+
+// ── Shared state ──────────────────────────────────────────────────────────────
+confirmed = not confirmOnClose or barstate.isconfirmed                              // [MP]
+
+plFound = not na(ta.pivotlow(osc, lbL, lbR))
+phFound = not na(ta.pivothigh(osc, lbL, lbR))
+
+_inRange(cond) =>
+    bars = ta.barssince(cond == true)
+    rangeLower <= bars and bars <= rangeUpper
+
+win = lbL + lbR + 1
+lowWin = ta.lowest(low, win)                                                        // [MP]
+highWin = ta.highest(high, win)                                                     // [MP]
+
+oscPiv = osc[lbR]
+priceLowRef = usePriceExtreme ? lowWin : low[lbR]
+priceHighRef = usePriceExtreme ? highWin : high[lbR]
+
+_msg(kind, oscVal, priceVal) =>
+    kind + " | " + syminfo.ticker + " " + timeframe.period + " | RSI " + str.tostring(oscVal, "#.##") + " @ " + str.tostring(priceVal, format.mintick)  // [MP]
+
+// ── Low-pivot side ────────────────────────────────────────────────────────────
+inRangePl = _inRange(plFound[1])
+prevOscPl = ta.valuewhen(plFound, oscPiv, 1)
+prevLowPl = ta.valuewhen(plFound, priceLowRef, 1)
+prevBarPl = ta.valuewhen(plFound, bar_index[lbR], 1)
+deltaOkPl = math.abs(oscPiv - prevOscPl) >= minOscDelta                             // [MP]
+zoneOkBull = not useZone or oscPiv <= bullZone                                      // [MP]
+
+// Regular Bullish — Osc: Higher Low / Price: Lower Low
+oscHL = oscPiv > prevOscPl and inRangePl
+priceLL = priceLowRef < prevLowPl
+bullCondAlert = priceLL and oscHL and plFound and deltaOkPl and zoneOkBull
+bullCond = plotBull and bullCondAlert and confirmed
+
+plot(plFound ? oscPiv : na, offset=-lbR, title="Regular Bullish", linewidth=2,
+     color=(bullCond ? bullColor : noneColor), display=display.pane, editable=plotBull)
+
+plotshape(bullCond ? oscPiv : na, offset=-lbR, title="Regular Bullish Label", text=" Bull ",
+     style=shape.labelup, location=location.absolute, color=bullColor, textcolor=textColor, editable=plotBull)
+
+// Hidden Bullish — Osc: Lower Low / Price: Higher Low
+oscLL = oscPiv < prevOscPl and inRangePl
+priceHL = priceLowRef > prevLowPl
+hiddenBullCondAlert = priceHL and oscLL and plFound and deltaOkPl
+hiddenBullCond = plotHiddenBull and hiddenBullCondAlert and confirmed
+
+plot(plFound ? oscPiv : na, offset=-lbR, title="Hidden Bullish", linewidth=2,
+     color=(hiddenBullCond ? hiddenBullColor : noneColor), display=display.pane, editable=plotHiddenBull)
+
+plotshape(hiddenBullCond ? oscPiv : na, offset=-lbR, title="Hidden Bullish Label", text=" H Bull ",
+     style=shape.labelup, location=location.absolute, color=bullColor, textcolor=textColor, editable=plotHiddenBull)
+
+// ── High-pivot side ───────────────────────────────────────────────────────────
+inRangePh = _inRange(phFound[1])
+prevOscPh = ta.valuewhen(phFound, oscPiv, 1)
+prevHighPh = ta.valuewhen(phFound, priceHighRef, 1)
+prevBarPh = ta.valuewhen(phFound, bar_index[lbR], 1)
+deltaOkPh = math.abs(oscPiv - prevOscPh) >= minOscDelta                             // [MP]
+zoneOkBear = not useZone or oscPiv >= bearZone                                      // [MP]
+
+// Regular Bearish — Osc: Lower High / Price: Higher High
+oscLH = oscPiv < prevOscPh and inRangePh
+priceHH = priceHighRef > prevHighPh
+bearCondAlert = priceHH and oscLH and phFound and deltaOkPh and zoneOkBear
+bearCond = plotBear and bearCondAlert and confirmed
+
+plot(phFound ? oscPiv : na, offset=-lbR, title="Regular Bearish", linewidth=2,
+     color=(bearCond ? bearColor : noneColor), display=display.pane, editable=plotBear)
+
+plotshape(bearCond ? oscPiv : na, offset=-lbR, title="Regular Bearish Label", text=" Bear ",
+     style=shape.labeldown, location=location.absolute, color=bearColor, textcolor=textColor, editable=plotBear)
+
+// Hidden Bearish — Osc: Higher High / Price: Lower High
+oscHH = oscPiv > prevOscPh and inRangePh
+priceLH = priceHighRef < prevHighPh
+hiddenBearCondAlert = priceLH and oscHH and phFound and deltaOkPh
+hiddenBearCond = plotHiddenBear and hiddenBearCondAlert and confirmed
+
+plot(phFound ? oscPiv : na, offset=-lbR, title="Hidden Bearish", linewidth=2,
+     color=(hiddenBearCond ? hiddenBearColor : noneColor), display=display.pane, editable=plotHiddenBear)
+
+plotshape(hiddenBearCond ? oscPiv : na, offset=-lbR, title="Hidden Bearish Label", text=" H Bear ",
+     style=shape.labeldown, location=location.absolute, color=bearColor, textcolor=textColor, editable=plotHiddenBear)
+
+// ── Optional price-chart lines ────────────────────────────────────────────────
+// Objects auto-expire past max_lines_count (500). [MP]
+if showPriceLines and bullCond
+    line.new(int(prevBarPl), prevLowPl, bar_index - lbR, priceLowRef, color=bullColor, width=2, force_overlay=true)
+if showPriceLines and hiddenBullCond
+    line.new(int(prevBarPl), prevLowPl, bar_index - lbR, priceLowRef, color=hiddenBullColor, width=2, style=line.style_dashed, force_overlay=true)
+if showPriceLines and bearCond
+    line.new(int(prevBarPh), prevHighPh, bar_index - lbR, priceHighRef, color=bearColor, width=2, force_overlay=true)
+if showPriceLines and hiddenBearCond
+    line.new(int(prevBarPh), prevHighPh, bar_index - lbR, priceHighRef, color=hiddenBearColor, width=2, style=line.style_dashed, force_overlay=true)
+
+// ── Alerts ────────────────────────────────────────────────────────────────────
+// Dynamic alert() — one alert covers all four types, message carries symbol/TF/RSI/price. [MP]
+if bullCondAlert and confirmed
+    alert(_msg("Regular Bullish Divergence", oscPiv, priceLowRef), alert.freq_once_per_bar)
+if hiddenBullCondAlert and confirmed
+    alert(_msg("Hidden Bullish Divergence", oscPiv, priceLowRef), alert.freq_once_per_bar)
+if bearCondAlert and confirmed
+    alert(_msg("Regular Bearish Divergence", oscPiv, priceHighRef), alert.freq_once_per_bar)
+if hiddenBearCondAlert and confirmed
+    alert(_msg("Hidden Bearish Divergence", oscPiv, priceHighRef), alert.freq_once_per_bar)
+
+// Static alertcondition() kept for per-type alert setup in the UI.
+alertcondition(bullCondAlert and confirmed, title='Regular Bullish Divergence', message="Regular Bullish Divergence found, `Pivot Lookback Right` bars to the left of the current bar")
+alertcondition(hiddenBullCondAlert and confirmed, title='Hidden Bullish Divergence', message='Hidden Bullish Divergence found, `Pivot Lookback Right` bars to the left of the current bar')
+alertcondition(bearCondAlert and confirmed, title='Regular Bearish Divergence', message='Regular Bearish Divergence found, `Pivot Lookback Right` bars to the left of the current bar')
+alertcondition(hiddenBearCondAlert and confirmed, title='Hidden Bearish Divergence', message='Hidden Bearish Divergence found, `Pivot Lookback Right` bars to the left of the current bar')
