@@ -3,7 +3,8 @@
 //
 // ============================================================================
 //  Key Levels 🌙🥒
-//  Monday range, D/W/M/Y highs, lows, mids, opens — with smart level merging
+//  Asia session, Monday range, D/W/M/Y highs, lows, mids, opens
+//  — with smart level merging
 //
 //  Split out of the "Pivots + Key Levels" master script. Logic is unchanged;
 //  the Pivots half now lives in its own indicator, so this script has the full
@@ -43,6 +44,18 @@ master_key_width = input.int(1, '', minval=1, maxval=10, group=grp_master, inlin
 // Line length + merge tolerance (defaults preserve prior behavior)
 line_len = input.int(10, 'Line Length (bars)', minval=1, group=grp_master)
 merge_ticks = input.float(2, 'Merge Tolerance (ticks)', minval=0, group=grp_master, tooltip='Two levels closer than this many ticks are merged onto one line.')
+
+// 🔹 ASIA SESSION
+grp_asia = '🌏 Key Levels · Asia Session'
+
+show_asia = input.bool(true, 'Show Asia H/L', group=grp_asia)
+show_asia_mid = input.bool(true, 'Show Asia 50%', group=grp_asia)
+asia_live = input.bool(true, 'Track Session Live', group=grp_asia, tooltip='On: while the Asia window is open the levels update with it. Off: only the last completed session is drawn, so the levels sit still until the window closes.')
+asia_sess = input.session('1600-1800', 'Session', group=grp_asia, tooltip='Default is the 16:00-18:00 New York post-US-close consolidation window (the "Asia Box"). For the full Tokyo cash session use 0900-1800 with Asia/Tokyo, or 0000-0800 with UTC.')
+asia_tz = input.string('America/New_York', 'Session Timezone', options=['America/New_York', 'UTC', 'Asia/Tokyo', 'Asia/Singapore', 'Asia/Hong_Kong', 'Europe/London', 'Pacific/Auckland'], group=grp_asia, tooltip='Anchor the session to the exchange that sets the schedule, not to your own clock. New York, London and Auckland observe DST; Tokyo, Singapore, Hong Kong and UTC do not.')
+col_asia = input.color(color.new(color.aqua, 20), 'Color', group=grp_asia, inline='a1')
+style_asia = input.string(opt_dashed, 'Style', options=[opt_solid, opt_dashed, opt_dotted], group=grp_asia, inline='a1')
+width_asia = input.int(1, 'Width', minval=1, maxval=10, group=grp_asia, inline='a1')
 
 // 🔹 MONDAY RANGE
 grp_mon = '📅 Key Levels · Monday Range'
@@ -185,7 +198,53 @@ if is_monday
         mon_h := math.max(mon_h, high)
         mon_l := math.min(mon_l, low)
 
-// 3. Draw Active Key Levels (Smart Aggregation Engine)
+// 3. Asia Session Logic
+//
+// Native accumulation, not request.security. The Asia window is an intraday
+// session, so its bars are already on the chart and there is nothing to fetch.
+// That also means these levels are correct in bar-replay, unlike the current
+// week/month/year values above.
+//
+// Requires an intraday chart timeframe that divides the session cleanly — 1m
+// through 1H is fine. On 4H+ and daily charts no bar falls inside the window,
+// asia_in is never true, and the levels stay na so nothing is drawn.
+
+asia_in = not na(time(timeframe.period, asia_sess, asia_tz))
+
+// Previous bar's state is carried in a var rather than read as asia_in[1].
+// nz() has no series-bool overload in v6, and an unguarded asia_in[1] is na on
+// bar 0, which makes the session-start test na (falsy) and silently skips the
+// first session. A var initialised to false has neither problem.
+var bool asia_was_in = false
+
+var float asia_dev_h = na    // session currently forming
+var float asia_dev_l = na
+var float asia_h = na        // last completed session
+var float asia_l = na
+
+if asia_in and not asia_was_in
+    // first bar of a new session
+    asia_dev_h := high
+    asia_dev_l := low
+else if asia_in
+    asia_dev_h := math.max(asia_dev_h, high)
+    asia_dev_l := math.min(asia_dev_l, low)
+
+if not asia_in and asia_was_in
+    // session just closed — freeze it
+    asia_h := asia_dev_h
+    asia_l := asia_dev_l
+
+asia_was_in := asia_in
+
+// Draw the developing session while it is open (if wanted), else the last
+// completed one. Both are na until the first session in the loaded history
+// finishes, and merge_or_add_level skips na prices, so nothing is drawn.
+asia_disp_h = asia_in and asia_live ? asia_dev_h : asia_h
+asia_disp_l = asia_in and asia_live ? asia_dev_l : asia_l
+asia_disp_mid = (asia_disp_h + asia_disp_l) / 2
+
+// 4. Draw Active Key Levels (Smart Aggregation Engine)
 var active_key_lines = array.new_line()
 var active_key_labels = array.new_label()
 
@@ -238,6 +297,10 @@ if master_key and barstate.islast
     styles = array.new_string()
 
     // Determine values based on master toggles
+    c_asia = master_key_col_on ? master_key_col : col_asia
+    s_asia = master_key_style_on ? master_key_style : style_asia
+    w_asia = master_key_width_on ? master_key_width : width_asia
+
     c_mon = master_key_col_on ? master_key_col : col_mon
     s_mon = master_key_style_on ? master_key_style : style_mon
     w_mon = master_key_width_on ? master_key_width : width_mon
@@ -274,6 +337,11 @@ if master_key and barstate.islast
     // NOTE (design): first level added at a coinciding price keeps its style/color/width;
     // later ones only append their name. So shorter timeframes win styling on overlap.
     // To make the higher timeframe dominate, reverse the add order below.
+
+    // Asia Session
+    merge_or_add_level(prices, names, colors, widths, styles, show_asia, asia_disp_h, "Asia H", c_asia, w_asia, s_asia)
+    merge_or_add_level(prices, names, colors, widths, styles, show_asia, asia_disp_l, "Asia L", c_asia, w_asia, s_asia)
+    merge_or_add_level(prices, names, colors, widths, styles, show_asia_mid, asia_disp_mid, "Asia 50%", c_asia, w_asia, s_asia)
 
     // Monday Range
     merge_or_add_level(prices, names, colors, widths, styles, show_mon, mon_h, "Mon H", c_mon, w_mon, s_mon)
