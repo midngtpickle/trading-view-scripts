@@ -2,7 +2,7 @@
 // © midnight pickle
 //
 // ============================================================================
-//  Pivots 🌙🥒
+//  Pivots MP
 //  Pivot Enhanced (Fibonacci / Camarilla, R1-R5 / S1-S5 + alerts)
 //
 //  Split out of the "Pivots + Key Levels" master script. Logic is unchanged;
@@ -13,7 +13,7 @@
 // ============================================================================
 
 //@version=6
-indicator('Pivots 🌙🥒', shorttitle='Pivots 🌙🥒', overlay=true, max_lines_count=500, max_labels_count=500, max_bars_back=5000)
+indicator('Pivots MP', shorttitle='Pivots MP', overlay=true, max_lines_count=500, max_labels_count=500, max_bars_back=5000)
 
 // ============================================================================
 // ██ PIVOTS ██

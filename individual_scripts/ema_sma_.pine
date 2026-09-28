@@ -2,7 +2,7 @@
 // © midnight pickle
 //
 // ============================================================================
-//  EMA / SMA 🌙🥒
+//  EMA / SMA MP
 //  Six EMAs, three SMAs, VWAP, and golden/death cross labels for both.
 //
 //  Split out of "EMA & PVSR Master". Logic unchanged. This script is now a
@@ -12,7 +12,7 @@
 // ============================================================================
 
 //@version=6
-indicator("EMA / SMA 🌙🥒", shorttitle="EMA/SMA 🌙🥒", overlay=true)
+indicator("EMA / SMA MP", shorttitle="EMA/SMA MP", overlay=true)
 
 // ==========================================
 // 🔹 MASTER TOGGLE - QUICK ACCESS

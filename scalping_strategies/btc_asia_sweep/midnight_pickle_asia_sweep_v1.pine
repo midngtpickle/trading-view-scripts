@@ -1,6 +1,6 @@
 //@version=6
 // ═══════════════════════════════════════════════════════════════════════════
-//  🌙🥒 BTC Asia Range Sweep & Reclaim — v1
+//  MP BTC Asia Range Sweep & Reclaim — v1
 //  A Midnight Pickle Production
 // ---------------------------------------------------------------------------
 //  CONCEPT
@@ -39,8 +39,8 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 strategy(
-     title                 = "🌙🥒 Asia Range Sweep & Reclaim v1",
-     shorttitle            = "🌙🥒 Sweep v1",
+     title                 = "MP Asia Range Sweep & Reclaim v1",
+     shorttitle            = "MP Sweep v1",
      overlay               = true,
      initial_capital       = 10000,
      default_qty_type      = strategy.fixed,
@@ -672,7 +672,7 @@ _row(int r, string lbl, int i) =>
 
 if showTable and barstate.islast
     table.clear(st, 0, 0, 4, 12)
-    table.cell(st, 0, 0, "🌙🥒 Sweep v1", text_size = size.tiny, text_color = color.white, bgcolor = color.new(color.teal, 40))
+    table.cell(st, 0, 0, "MP Sweep v1", text_size = size.tiny, text_color = color.white, bgcolor = color.new(color.teal, 40))
     table.cell(st, 1, 0, "n",    text_size = size.tiny, text_color = color.white, bgcolor = color.new(color.teal, 40))
     table.cell(st, 2, 0, "win%", text_size = size.tiny, text_color = color.white, bgcolor = color.new(color.teal, 40))
     table.cell(st, 3, 0, "avgR", text_size = size.tiny, text_color = color.white, bgcolor = color.new(color.teal, 40))
@@ -706,5 +706,5 @@ if showTable and barstate.islast
 // ═══════════════════════════════════════════════════════════════════════════
 //  ALERTS
 // ═══════════════════════════════════════════════════════════════════════════
-alertcondition(goLong,  "Sweep Long",  "🌙🥒 Asia Box low swept and reclaimed — long")
-alertcondition(goShort, "Sweep Short", "🌙🥒 Asia Box high swept and reclaimed — short")
+alertcondition(goLong,  "Sweep Long",  "MP Asia Box low swept and reclaimed — long")
+alertcondition(goShort, "Sweep Short", "MP Asia Box high swept and reclaimed — short")

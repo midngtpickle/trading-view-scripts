@@ -1,4 +1,4 @@
-# RSI Divergence Indicator — MP 🌙🥒
+# RSI Divergence Indicator — MP
 
 Pine Script v6 indicator that detects regular and hidden RSI divergences against price, with filtering and confirmation controls the TradingView built-in doesn't have.
 

@@ -1,4 +1,4 @@
-# 🌙🥒 BTC Asia Range Sweep & Reclaim — Strategy Guide v1
+# MP BTC Asia Range Sweep & Reclaim — Strategy Guide v1
 
 Companion doc for `midnight_pickle_asia_sweep_v1.pine`.
 
@@ -259,4 +259,4 @@ Because this is single-session and BTC-only, your sample ceiling is roughly 250 
 
 ---
 
-*Not financial advice. This is a jar of brine with strong opinions about pivot geometry.* 🌙🥒
+*Not financial advice. This is a jar of brine with strong opinions about pivot geometry.*

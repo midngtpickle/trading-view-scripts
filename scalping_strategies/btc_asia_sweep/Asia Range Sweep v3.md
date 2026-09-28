@@ -1,4 +1,4 @@
-# Asia Range Sweep — BTC Playbook (NZ Edition, v2)
+# Asia Range Sweep — BTC Playbook (NZ Edition, v3)
 
 High-probability scalping framework for the Asia session, built for a New Zealand schedule.
 Status: **untested hypothesis** — see Section 10 before risking capital.

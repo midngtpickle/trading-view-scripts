@@ -2,7 +2,7 @@
 // © midnight pickle
 //
 // ============================================================================
-//  Pivots + Key Levels 🌙🥒  — merged master script
+//  Pivots + Key Levels MP  — merged master script
 //  PART 1: Pivot Enhanced (Fibonacci / Camarilla, R1-R5 / S1-S5 + alerts)
 //  PART 2: Key Levels (Asia session, Monday range, D/W/M/Y highs, lows, mids, opens)
 //
@@ -13,7 +13,7 @@
 // ============================================================================
 
 //@version=6
-indicator('Pivots + Key Levels 🌙🥒', shorttitle='Pivots+Levels 🌙🥒', overlay=true, max_lines_count=500, max_labels_count=500, max_bars_back=5000)
+indicator('Pivots + Key Levels MP', shorttitle='Pivots+Levels MP', overlay=true, max_lines_count=500, max_labels_count=500, max_bars_back=5000)
 
 
 // ============================================================================

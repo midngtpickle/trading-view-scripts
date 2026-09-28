@@ -1,6 +1,6 @@
 //@version=6
 // ============================================================================
-// 🌙🥒 EMA 9/21 Pullback Continuation — A Midnight Pickle Production
+// MP EMA 9/21 Pullback Continuation — A Midnight Pickle Production
 // ----------------------------------------------------------------------------
 // Concept: Trend-following, NOT mean reversion. Waits for an established
 // 9/21 EMA trend, lets price pull back INTO the EMA zone, then enters on the
@@ -14,8 +14,8 @@
 // Designed for 5m / 15m BTC.
 // ============================================================================
 
-strategy("🌙🥒 EMA 9/21 Pullback Continuation",
-     shorttitle       = "🌙🥒 EMA Pullback",
+strategy("MP EMA 9/21 Pullback Continuation",
+     shorttitle       = "MP EMA Pullback",
      overlay          = true,
      initial_capital  = 10000,
      default_qty_type = strategy.percent_of_equity,
@@ -363,7 +363,7 @@ if showTable and barstate.islast
              frame_width=1, frame_color=color.new(color.gray, 50), bgcolor=color.new(color.black, 15))
     table.clear(st, 0, 0, 4, 16)
 
-    table.cell(st, 0, 0, "🌙🥒 Bucket", text_color=color.yellow, text_size=sz, text_halign=text.align_left)
+    table.cell(st, 0, 0, "MP Bucket", text_color=color.yellow, text_size=sz, text_halign=text.align_left)
     table.cell(st, 1, 0, "N",     text_color=color.yellow, text_size=sz)
     table.cell(st, 2, 0, "Win%",  text_color=color.yellow, text_size=sz)
     table.cell(st, 3, 0, "Avg R", text_color=color.yellow, text_size=sz)

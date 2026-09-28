@@ -2,7 +2,7 @@
 // © midnight pickle
 //
 // ============================================================================
-//  Key Levels 🌙🥒
+//  Key Levels MP
 //  Asia session, Monday range, D/W/M/Y highs, lows, mids, opens
 //  — with smart level merging
 //
@@ -12,7 +12,7 @@
 // ============================================================================
 
 //@version=6
-indicator('Key Levels 🌙🥒', shorttitle='Key Levels 🌙🥒', overlay=true, max_lines_count=500, max_labels_count=500, max_bars_back=5000)
+indicator('Key Levels MP', shorttitle='Key Levels MP', overlay=true, max_lines_count=500, max_labels_count=500, max_bars_back=5000)
 
 // ============================================================================
 // ██ KEY LEVELS ██

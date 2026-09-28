@@ -2,7 +2,7 @@
 // © midnight pickle
 //
 // ============================================================================
-//  PVSR Candles 🌙🥒
+//  PVSR Candles MP
 //  PVSRA candle colouring (climax / above-average / regular) + vector alerts.
 //
 //  Split out of "EMA & PVSR Master". Classification logic unchanged.
@@ -13,7 +13,7 @@
 // ============================================================================
 
 //@version=6
-indicator("PVSR Candles 🌙🥒", shorttitle="PVSR Candles 🌙🥒", overlay=true)
+indicator("PVSR Candles MP", shorttitle="PVSR Candles MP", overlay=true)
 
 // ==========================================
 // 🔹 MASTER TOGGLE
