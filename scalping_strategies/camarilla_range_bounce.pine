@@ -1,6 +1,6 @@
 //@version=6
 // ============================================================================
-// 🌙🥒 Camarilla Range Bounce Scalper — A Midnight Pickle Production
+// MP Camarilla Range Bounce Scalper — A Midnight Pickle Production
 // ----------------------------------------------------------------------------
 // Concept: In SIDEWAYS/RANGING conditions, Camarilla R3/S3 act as reversion
 // boundaries rather than breakout triggers. This strategy fades touches of
@@ -11,8 +11,8 @@
 // logic actively LOSES money in trending markets — that is expected, not a bug.
 // ============================================================================
 
-strategy("🌙🥒 Camarilla Range Bounce",
-     shorttitle       = "🌙🥒 RangeBounce",
+strategy("MP Camarilla Range Bounce",
+     shorttitle       = "MP RangeBounce",
      overlay          = true,
      initial_capital  = 10000,
      default_qty_type = strategy.percent_of_equity,
@@ -318,7 +318,7 @@ if showTable and barstate.islast
     table.clear(st, 0, 0, 4, 15)
 
     // Column headers
-    table.cell(st, 0, 0, "🌙🥒 Bucket", text_color=color.yellow, text_size=sz, text_halign=text.align_left)
+    table.cell(st, 0, 0, "MP Bucket", text_color=color.yellow, text_size=sz, text_halign=text.align_left)
     table.cell(st, 1, 0, "N",     text_color=color.yellow, text_size=sz)
     table.cell(st, 2, 0, "Win%",  text_color=color.yellow, text_size=sz)
     table.cell(st, 3, 0, "Avg R", text_color=color.yellow, text_size=sz)

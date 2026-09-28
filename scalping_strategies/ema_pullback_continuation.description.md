@@ -1,6 +1,6 @@
-# 🌙🥒 EMA 9/21 Pullback Continuation — Strategy Guide
+# MP EMA 9/21 Pullback Continuation — Strategy Guide
 
-*A Midnight Pickle 🌙🥒 Production*
+*A Midnight Pickle (MP) Production*
 
 Pine Script v6 trend-following strategy designed for 5m/15m Bitcoin trading during high-volatility/trending market conditions.
 
@@ -49,31 +49,34 @@ Before evaluating backtest results in the Strategy Tester, ensure these paramete
 
 ## 4. Strategy Rules & State Machine
 
-The entry logic operates on a 3-state machine visible via chart background shading:
+The entry logic operates on a 3-state machine. A faint teal/red background marks the trend regime; a stronger tint marks an armed setup.
 
 | State | Condition | Visual Indicator |
 |---|---|---|
-| **ARM** | Trend intact & price touches 9 EMA pullback zone | Strong background tint |
-| **FIRE** | Resumption candle closes back through 9 EMA | Entry triangle marker |
-| **DISARM** | Price breaches 21 EMA (reversal) or `armExpiry` bars pass | Background shading clears |
+| **ARM** | Trend intact & low (long) / high (short) comes within `touchAtr` (default 0.20 ATR) of the 9 EMA | Strong background tint |
+| **FIRE** | Candle closes back beyond the 9 EMA in the trend direction, with a green (long) / red (short) body | Entry triangle marker |
+| **DISARM** | Close goes more than `deepStop` (default 0.35 ATR) past the 21 EMA, the trend conditions stop holding, or `armExpiry` (default 12) bars pass | Strong tint clears |
 
 ### Entry Conditions (All must be true)
-- **EMA Trend**: 9 EMA separated from 21 EMA, 21 EMA sloping in trend direction.
-- **HTF Alignment**: Price aligned with 50 HTF EMA (60m on 5m chart, 240m on 15m chart).
-- **Regime Filters**: ADX > `adxMin` (trending market), 9/21 EMA separation > `separAtr` (rejects chop).
-- **Resumption**: Setup is armed by a pullback touch, then triggered by a resumption close.
+- **EMA Trend**: 9 EMA above (long) / below (short) the 21 EMA, and the 21 EMA rising / falling over the last `slopeLen` (default 3) bars.
+- **HTF Alignment** (default on): Close above (long) / below (short) the 50 EMA of the previous completed `htf` bar (default `60`; use `240` on 15m).
+- **Regime Filters**: ADX(14) > `adxMin` (default 22), and the 9/21 gap ≥ `separAtr` (default 0.15 ATR).
+- **Resumption**: Setup is armed by a pullback touch, then triggered by a resumption close. Optional stricter trigger: close beyond the prior bar's high/low (`needEngulf`, off by default).
+- **Limits**: Max `5` entries per day. Optional session filter (off by default; `0700-1600` Europe/London when on). Longs and shorts can be disabled separately.
 
 ### Exit Mechanics
-- **TP1**: 50% scale-out at 1.0 R-multiple.
-- **Runner Exits**: Chandelier trailing stop (default), Slow EMA trail, or fixed target (2.5R).
-- **Stop Loss**: Beyond the pullback swing high/low + ATR buffer.
+- **TP1**: `tp1Pct` (default 50%) scale-out at `tp1R` (default 1.0R).
+- **Runner Exits**: Chandelier (default: highest high / lowest low of 10 bars ∓ 2.0 ATR), Slow EMA (21 EMA ∓ the swing buffer), or `Fixed R` target at `tp2R` (default 2.5R). Trailing stops only ever tighten.
+- **Stop Loss**: `Swing` mode (default) sits beyond the pullback's extreme plus a 0.15 ATR buffer. `ATR` mode uses 1.5 × ATR(14) from entry.
+- **Breakeven**: Stop pulls to entry after TP1 (default on).
 - **Trend Flip**: Full exit if 9/21 EMAs cross in reverse direction.
+- **Time Stop**: Optional, off by default (`0`).
 
 ---
 
 ## 5. Performance Analytics Table
 
-The on-chart stats table tracks performance without win-rate inflation from scale-outs:
+The on-chart stats table measures each **position** once, from open to flat, so TP1 scale-outs aren't counted as separate wins. R is the net P&L divided by the initial cash risk (entry to original stop, before any breakeven or trail move):
 
 - **N**: Total full trade positions.
 - **Win%**: Percentage of positions closing net positive.
@@ -82,9 +85,10 @@ The on-chart stats table tracks performance without win-rate inflation from scal
 - **Best Trade**: Displays largest single trade R-multiple and its percentage of net profit to audit outlier reliance.
 
 ### Breakdown Categories
-- **Regime (ADX at Entry)**: Verifies that high ADX (>30) outperforms weak ADX.
-- **Session (UTC)**: Slices performance by Asia (00:00–07:00 UTC), London (07:00–13:00 UTC), and NY (13:00–21:00 UTC).
-- **Direction**: Audits Long vs Short performance asymmetry.
+- **Regime (ADX at Entry)**: Weak (<20), Trending (20–30), Strong (30+). Checks whether strong trends actually outperform.
+- **Session (UTC)**: Asia (00–07), London (07–13), NY (13–21), Late (21–24).
+- **Direction**: Long (bull pullback) vs Short (bear rally) asymmetry.
+- **Total**: All trades, plus trades per day and the number of days in the sample.
 
 ---
 

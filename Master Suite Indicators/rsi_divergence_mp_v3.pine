@@ -1,0 +1,352 @@
+//@version=6
+// RSI Divergence Indicator — hardened fork of the TradingView built-in
+// Midnight Pickle build. Changes vs. the original are tagged [MP].
+//
+// v3 — EARLY SIGNALS [MP v3]
+//   A standard pivot needs `Pivot Lookback Right` bars after it before it can be
+//   confirmed, so every standard signal prints lbR bars late (5 bars = 75 min on
+//   the 15m). Early mode detects the NEWEST pivot with a much shorter right
+//   lookback (default 2) and compares it against the last FULLY CONFIRMED pivot.
+//   The reference side keeps full quality; only the newest pivot is provisional.
+//
+//   Every early signal is then tracked until the full lookback has passed:
+//     ✓  held   — the pivot survived the full lookback (it becomes a normal pivot)
+//     ✕  failed — RSI went beyond the pivot first, so the early signal was wrong
+//   A hit-rate table counts held vs failed so the trade-off can be measured.
+//   The standard (v2) signals are unchanged and still print exactly as before.
+//
+// NOTE: no `timeframe=` argument — Pine forbids it alongside side-effect calls
+// (alert(), line.new()). Use the chart timeframe. [MP]
+indicator(title="RSI Divergence Indicator MP v3", shorttitle="RSI Div MP v3", format=format.price, precision=2, max_lines_count=500)
+
+// ── Inputs ────────────────────────────────────────────────────────────────────
+gR = "RSI"
+len = input.int(14, "RSI Period", minval=1, group=gR)
+src = input.source(close, "RSI Source", group=gR)                                   // [MP] typed source input
+
+gP = "Pivots"
+lbR = input.int(5, "Pivot Lookback Right", minval=1, group=gP)                      // [MP] minval guard
+lbL = input.int(5, "Pivot Lookback Left", minval=1, group=gP)                       // [MP] minval guard
+rangeUpper = input.int(60, "Max of Lookback Range", minval=1, group=gP)
+rangeLower = input.int(5, "Min of Lookback Range", minval=1, group=gP)
+usePriceExtreme = input.bool(false, "Use true swing extreme for price", group=gP,
+     tooltip="Off = original behaviour: compares price at the RSI pivot bar. On = compares the actual high/low of the swing window, which is closer to what you see on the chart.")  // [MP]
+
+gE = "Early signals (v3)"                                                           // [MP v3]
+earlyOn = input.bool(true, "Show early divergence signals", group=gE,
+     tooltip="Detects the newest pivot after only 'Early pivot lookback right' bars instead of the full lookback. Much faster, but some early signals will fail — watch the ✓ / ✕ markers and the hit-rate table.")
+fastRIn = input.int(2, "Early pivot lookback right", minval=1, group=gE,
+     tooltip="Bars required after the pivot before an early signal prints. Must be smaller than 'Pivot Lookback Right' (it is capped automatically). 1 = fastest and noisiest, 2 = sensible default.")
+showOutcome = input.bool(true, "Mark outcome (✓ held / ✕ failed)", group=gE)
+showStats = input.bool(true, "Show early-signal hit-rate table", group=gE)
+
+gF = "Filters"
+confirmOnClose = input.bool(true, "Confirm on bar close", group=gF,
+     tooltip="Pivot detection includes the live bar, so signals can appear and vanish intrabar. On = only draw/alert once the bar closes.")                                        // [MP]
+useZone = input.bool(false, "Require RSI pivot inside zone (regular div only)", group=gF)  // [MP]
+bullZone = input.float(40, "Bull: RSI pivot at or below", minval=0, maxval=100, group=gF)
+bearZone = input.float(60, "Bear: RSI pivot at or above", minval=0, maxval=100, group=gF)
+minOscDelta = input.float(0, "Min RSI difference between pivots", minval=0, step=0.5, group=gF,
+     tooltip="Rejects near-flat divergences. 3-5 is a reasonable starting point on low timeframes.")  // [MP]
+
+gD = "Display"
+plotBull = input.bool(true, "Plot Bullish", group=gD, display=display.none)
+plotHiddenBull = input.bool(false, "Plot Hidden Bullish", group=gD, display=display.none)
+plotBear = input.bool(true, "Plot Bearish", group=gD, display=display.none)
+plotHiddenBear = input.bool(false, "Plot Hidden Bearish", group=gD, display=display.none)
+showPriceLines = input.bool(false, "Draw divergence lines on price chart", group=gD)  // [MP]
+
+bearColor = color.red
+bullColor = color.green
+hiddenBullColor = color.new(color.green, 80)
+hiddenBearColor = color.new(color.red, 80)
+earlyBullColor = #00BCD4                                                            // [MP v3] cyan
+earlyBearColor = #FF9800                                                            // [MP v3] orange
+failColor = #787B86                                                                 // [MP v3] grey
+textColor = color.white
+noneColor = color.new(color.white, 100)
+
+// ── Oscillator ────────────────────────────────────────────────────────────────
+osc = ta.rsi(src, len)
+
+plot(osc, title="RSI", linewidth=2, color=#2962FF)
+hline(50, title="Middle Line", color=#787B86, linestyle=hline.style_dotted)
+obLevel = hline(70, title="Overbought", color=#787B86, linestyle=hline.style_dotted)
+osLevel = hline(30, title="Oversold", color=#787B86, linestyle=hline.style_dotted)
+fill(obLevel, osLevel, title="Background", color=color.rgb(33, 150, 243, 90))
+
+// ── Shared state ──────────────────────────────────────────────────────────────
+confirmed = not confirmOnClose or barstate.isconfirmed                              // [MP]
+
+plFound = not na(ta.pivotlow(osc, lbL, lbR))
+phFound = not na(ta.pivothigh(osc, lbL, lbR))
+
+_inRange(cond) =>
+    bars = ta.barssince(cond == true)
+    rangeLower <= bars and bars <= rangeUpper
+
+win = lbL + lbR + 1
+lowWin = ta.lowest(low, win)                                                        // [MP]
+highWin = ta.highest(high, win)                                                     // [MP]
+
+oscPiv = osc[lbR]
+priceLowRef = usePriceExtreme ? lowWin : low[lbR]
+priceHighRef = usePriceExtreme ? highWin : high[lbR]
+
+_msg(kind, oscVal, priceVal) =>
+    kind + " | " + syminfo.ticker + " " + timeframe.period + " | RSI " + str.tostring(oscVal, "#.##") + " @ " + str.tostring(priceVal, format.mintick)  // [MP]
+
+// ── Low-pivot side ────────────────────────────────────────────────────────────
+inRangePl = _inRange(plFound[1])
+prevOscPl = ta.valuewhen(plFound, oscPiv, 1)
+prevLowPl = ta.valuewhen(plFound, priceLowRef, 1)
+prevBarPl = ta.valuewhen(plFound, bar_index[lbR], 1)
+deltaOkPl = math.abs(oscPiv - prevOscPl) >= minOscDelta                             // [MP]
+zoneOkBull = not useZone or oscPiv <= bullZone                                      // [MP]
+
+// Regular Bullish — Osc: Higher Low / Price: Lower Low
+oscHL = oscPiv > prevOscPl and inRangePl
+priceLL = priceLowRef < prevLowPl
+bullCondAlert = priceLL and oscHL and plFound and deltaOkPl and zoneOkBull
+bullCond = plotBull and bullCondAlert and confirmed
+
+plot(plFound ? oscPiv : na, offset=-lbR, title="Regular Bullish", linewidth=2,
+     color=(bullCond ? bullColor : noneColor), display=display.pane, editable=plotBull)
+
+plotshape(bullCond ? oscPiv : na, offset=-lbR, title="Regular Bullish Label", text=" Bull ",
+     style=shape.labelup, location=location.absolute, color=bullColor, textcolor=textColor, editable=plotBull)
+
+// Hidden Bullish — Osc: Lower Low / Price: Higher Low
+oscLL = oscPiv < prevOscPl and inRangePl
+priceHL = priceLowRef > prevLowPl
+hiddenBullCondAlert = priceHL and oscLL and plFound and deltaOkPl
+hiddenBullCond = plotHiddenBull and hiddenBullCondAlert and confirmed
+
+plot(plFound ? oscPiv : na, offset=-lbR, title="Hidden Bullish", linewidth=2,
+     color=(hiddenBullCond ? hiddenBullColor : noneColor), display=display.pane, editable=plotHiddenBull)
+
+plotshape(hiddenBullCond ? oscPiv : na, offset=-lbR, title="Hidden Bullish Label", text=" H Bull ",
+     style=shape.labelup, location=location.absolute, color=bullColor, textcolor=textColor, editable=plotHiddenBull)
+
+// ── High-pivot side ───────────────────────────────────────────────────────────
+inRangePh = _inRange(phFound[1])
+prevOscPh = ta.valuewhen(phFound, oscPiv, 1)
+prevHighPh = ta.valuewhen(phFound, priceHighRef, 1)
+prevBarPh = ta.valuewhen(phFound, bar_index[lbR], 1)
+deltaOkPh = math.abs(oscPiv - prevOscPh) >= minOscDelta                             // [MP]
+zoneOkBear = not useZone or oscPiv >= bearZone                                      // [MP]
+
+// Regular Bearish — Osc: Lower High / Price: Higher High
+oscLH = oscPiv < prevOscPh and inRangePh
+priceHH = priceHighRef > prevHighPh
+bearCondAlert = priceHH and oscLH and phFound and deltaOkPh and zoneOkBear
+bearCond = plotBear and bearCondAlert and confirmed
+
+plot(phFound ? oscPiv : na, offset=-lbR, title="Regular Bearish", linewidth=2,
+     color=(bearCond ? bearColor : noneColor), display=display.pane, editable=plotBear)
+
+plotshape(bearCond ? oscPiv : na, offset=-lbR, title="Regular Bearish Label", text=" Bear ",
+     style=shape.labeldown, location=location.absolute, color=bearColor, textcolor=textColor, editable=plotBear)
+
+// Hidden Bearish — Osc: Higher High / Price: Lower High
+oscHH = oscPiv > prevOscPh and inRangePh
+priceLH = priceHighRef < prevHighPh
+hiddenBearCondAlert = priceLH and oscHH and phFound and deltaOkPh
+hiddenBearCond = plotHiddenBear and hiddenBearCondAlert and confirmed
+
+plot(phFound ? oscPiv : na, offset=-lbR, title="Hidden Bearish", linewidth=2,
+     color=(hiddenBearCond ? hiddenBearColor : noneColor), display=display.pane, editable=plotHiddenBear)
+
+plotshape(hiddenBearCond ? oscPiv : na, offset=-lbR, title="Hidden Bearish Label", text=" H Bear ",
+     style=shape.labeldown, location=location.absolute, color=bearColor, textcolor=textColor, editable=plotHiddenBear)
+
+// ── Early signals [MP v3] ─────────────────────────────────────────────────────
+// Right lookback for the newest pivot, capped below the full lookback.
+fR = math.max(1, math.min(fastRIn, lbR - 1))
+earlyActive = earlyOn and lbR > 1
+
+// Pivot calls are made unconditionally every bar (Pine v6 evaluates and/or lazily).
+_plFast = ta.pivotlow(osc, lbL, fR)
+_phFast = ta.pivothigh(osc, lbL, fR)
+plFastFound = earlyActive and not na(_plFast)
+phFastFound = earlyActive and not na(_phFast)
+
+oscPivF = osc[fR]
+winF = lbL + fR + 1
+lowWinF = ta.lowest(low, winF)
+highWinF = ta.highest(high, winF)
+priceLowRefF = usePriceExtreme ? lowWinF : low[fR]
+priceHighRefF = usePriceExtreme ? highWinF : high[fR]
+
+// Reference = the most recent FULLY confirmed pivot on each side.
+refOscPl = ta.valuewhen(plFound, oscPiv, 0)
+refLowPl = ta.valuewhen(plFound, priceLowRef, 0)
+refBarPl = ta.valuewhen(plFound, bar_index - lbR, 0)
+refOscPh = ta.valuewhen(phFound, oscPiv, 0)
+refHighPh = ta.valuewhen(phFound, priceHighRef, 0)
+refBarPh = ta.valuewhen(phFound, bar_index - lbR, 0)
+
+// Bars between the reference pivot and the new early pivot.
+sepPl = (bar_index - fR) - refBarPl
+sepPh = (bar_index - fR) - refBarPh
+inRangeFPl = not na(refBarPl) and sepPl >= rangeLower and sepPl <= rangeUpper
+inRangeFPh = not na(refBarPh) and sepPh >= rangeLower and sepPh <= rangeUpper
+
+deltaOkFPl = math.abs(oscPivF - refOscPl) >= minOscDelta
+deltaOkFPh = math.abs(oscPivF - refOscPh) >= minOscDelta
+zoneOkBullF = not useZone or oscPivF <= bullZone
+zoneOkBearF = not useZone or oscPivF >= bearZone
+
+eBullAlert = plFastFound and inRangeFPl and oscPivF > refOscPl and priceLowRefF < refLowPl and deltaOkFPl and zoneOkBullF
+eHBullAlert = plFastFound and inRangeFPl and oscPivF < refOscPl and priceLowRefF > refLowPl and deltaOkFPl
+eBearAlert = phFastFound and inRangeFPh and oscPivF < refOscPh and priceHighRefF > refHighPh and deltaOkFPh and zoneOkBearF
+eHBearAlert = phFastFound and inRangeFPh and oscPivF > refOscPh and priceHighRefF < refHighPh and deltaOkFPh
+
+eBull = plotBull and eBullAlert and confirmed
+eHBull = plotHiddenBull and eHBullAlert and confirmed
+eBear = plotBear and eBearAlert and confirmed
+eHBear = plotHiddenBear and eHBearAlert and confirmed
+
+plotshape(eBull ? oscPivF : na, offset=-fR, title="Early Bullish Label", text=" E Bull ",
+     style=shape.labelup, location=location.absolute, color=earlyBullColor, textcolor=textColor)
+plotshape(eHBull ? oscPivF : na, offset=-fR, title="Early Hidden Bullish Label", text=" E H Bull ",
+     style=shape.labelup, location=location.absolute, color=color.new(earlyBullColor, 40), textcolor=textColor)
+plotshape(eBear ? oscPivF : na, offset=-fR, title="Early Bearish Label", text=" E Bear ",
+     style=shape.labeldown, location=location.absolute, color=earlyBearColor, textcolor=textColor)
+plotshape(eHBear ? oscPivF : na, offset=-fR, title="Early Hidden Bearish Label", text=" E H Bear ",
+     style=shape.labeldown, location=location.absolute, color=color.new(earlyBearColor, 40), textcolor=textColor)
+
+// ── Early-signal outcome tracking [MP v3] ─────────────────────────────────────
+// A pending early pivot is resolved when either:
+//   held   — the full-lookback detector confirms a pivot on the same bar
+//   failed — RSI goes beyond the pivot value, or the full lookback expires unconfirmed
+var int pBullBar = na
+var float pBullOsc = na
+var int pBearBar = na
+var float pBearOsc = na
+var int nBullHeld = 0
+var int nBullFail = 0
+var int nBearHeld = 0
+var int nBearFail = 0
+
+bullHeld = false
+bullFail = false
+bearHeld = false
+bearFail = false
+
+if not na(pBullBar) and confirmed
+    if plFound and (bar_index - lbR) == pBullBar
+        bullHeld := true
+    else if osc < pBullOsc or (bar_index - pBullBar) > lbR
+        bullFail := true
+    if bullHeld or bullFail
+        pBullBar := na
+        pBullOsc := na
+
+if not na(pBearBar) and confirmed
+    if phFound and (bar_index - lbR) == pBearBar
+        bearHeld := true
+    else if osc > pBearOsc or (bar_index - pBearBar) > lbR
+        bearFail := true
+    if bearHeld or bearFail
+        pBearBar := na
+        pBearOsc := na
+
+if bullHeld
+    nBullHeld += 1
+if bullFail
+    nBullFail += 1
+if bearHeld
+    nBearHeld += 1
+if bearFail
+    nBearFail += 1
+
+// Register new early signals after resolving old ones.
+if eBull or eHBull
+    pBullBar := bar_index - fR
+    pBullOsc := oscPivF
+if eBear or eHBear
+    pBearBar := bar_index - fR
+    pBearOsc := oscPivF
+
+plotshape(showOutcome and bullHeld ? osc : na, title="Early Bull Held", text="✓", style=shape.circle,
+     location=location.absolute, color=earlyBullColor, textcolor=earlyBullColor, size=size.tiny)
+plotshape(showOutcome and bullFail ? osc : na, title="Early Bull Failed", style=shape.xcross,
+     location=location.absolute, color=failColor, size=size.tiny)
+plotshape(showOutcome and bearHeld ? osc : na, title="Early Bear Held", text="✓", style=shape.circle,
+     location=location.absolute, color=earlyBearColor, textcolor=earlyBearColor, size=size.tiny)
+plotshape(showOutcome and bearFail ? osc : na, title="Early Bear Failed", style=shape.xcross,
+     location=location.absolute, color=failColor, size=size.tiny)
+
+// ── Hit-rate table [MP v3] ────────────────────────────────────────────────────
+_rate(h, f) =>
+    tot = h + f
+    tot > 0 ? str.tostring(100.0 * h / tot, "#") + "%" : "–"
+
+var table statsT = table.new(position.top_right, 4, 3, bgcolor=color.new(#131722, 10), border_color=color.new(#787B86, 60), border_width=1)
+if showStats and earlyActive and barstate.islast
+    table.cell(statsT, 0, 0, "Early (R=" + str.tostring(fR) + ")", text_color=color.white, text_size=size.small)
+    table.cell(statsT, 1, 0, "Held", text_color=color.white, text_size=size.small)
+    table.cell(statsT, 2, 0, "Failed", text_color=color.white, text_size=size.small)
+    table.cell(statsT, 3, 0, "Hit rate", text_color=color.white, text_size=size.small)
+    table.cell(statsT, 0, 1, "Bull", text_color=earlyBullColor, text_size=size.small)
+    table.cell(statsT, 1, 1, str.tostring(nBullHeld), text_color=color.white, text_size=size.small)
+    table.cell(statsT, 2, 1, str.tostring(nBullFail), text_color=color.white, text_size=size.small)
+    table.cell(statsT, 3, 1, _rate(nBullHeld, nBullFail), text_color=color.white, text_size=size.small)
+    table.cell(statsT, 0, 2, "Bear", text_color=earlyBearColor, text_size=size.small)
+    table.cell(statsT, 1, 2, str.tostring(nBearHeld), text_color=color.white, text_size=size.small)
+    table.cell(statsT, 2, 2, str.tostring(nBearFail), text_color=color.white, text_size=size.small)
+    table.cell(statsT, 3, 2, _rate(nBearHeld, nBearFail), text_color=color.white, text_size=size.small)
+
+// ── Optional price-chart lines ────────────────────────────────────────────────
+// Objects auto-expire past max_lines_count (500). [MP]
+if showPriceLines and bullCond
+    line.new(int(prevBarPl), prevLowPl, bar_index - lbR, priceLowRef, color=bullColor, width=2, force_overlay=true)
+if showPriceLines and hiddenBullCond
+    line.new(int(prevBarPl), prevLowPl, bar_index - lbR, priceLowRef, color=hiddenBullColor, width=2, style=line.style_dashed, force_overlay=true)
+if showPriceLines and bearCond
+    line.new(int(prevBarPh), prevHighPh, bar_index - lbR, priceHighRef, color=bearColor, width=2, force_overlay=true)
+if showPriceLines and hiddenBearCond
+    line.new(int(prevBarPh), prevHighPh, bar_index - lbR, priceHighRef, color=hiddenBearColor, width=2, style=line.style_dashed, force_overlay=true)
+// Early signals get thin dotted lines so they read as provisional. [MP v3]
+if showPriceLines and (eBull or eHBull)
+    line.new(int(refBarPl), refLowPl, bar_index - fR, priceLowRefF, color=earlyBullColor, width=1, style=line.style_dotted, force_overlay=true)
+if showPriceLines and (eBear or eHBear)
+    line.new(int(refBarPh), refHighPh, bar_index - fR, priceHighRefF, color=earlyBearColor, width=1, style=line.style_dotted, force_overlay=true)
+
+// ── Alerts ────────────────────────────────────────────────────────────────────
+// Dynamic alert() — one alert covers all types, message carries symbol/TF/RSI/price. [MP]
+if bullCondAlert and confirmed
+    alert(_msg("Regular Bullish Divergence", oscPiv, priceLowRef), alert.freq_once_per_bar)
+if hiddenBullCondAlert and confirmed
+    alert(_msg("Hidden Bullish Divergence", oscPiv, priceLowRef), alert.freq_once_per_bar)
+if bearCondAlert and confirmed
+    alert(_msg("Regular Bearish Divergence", oscPiv, priceHighRef), alert.freq_once_per_bar)
+if hiddenBearCondAlert and confirmed
+    alert(_msg("Hidden Bearish Divergence", oscPiv, priceHighRef), alert.freq_once_per_bar)
+
+// Early alerts are clearly marked as unconfirmed, plus a follow-up if they fail. [MP v3]
+if eBullAlert and confirmed
+    alert(_msg("EARLY Regular Bullish Divergence (unconfirmed)", oscPivF, priceLowRefF), alert.freq_once_per_bar)
+if eHBullAlert and confirmed
+    alert(_msg("EARLY Hidden Bullish Divergence (unconfirmed)", oscPivF, priceLowRefF), alert.freq_once_per_bar)
+if eBearAlert and confirmed
+    alert(_msg("EARLY Regular Bearish Divergence (unconfirmed)", oscPivF, priceHighRefF), alert.freq_once_per_bar)
+if eHBearAlert and confirmed
+    alert(_msg("EARLY Hidden Bearish Divergence (unconfirmed)", oscPivF, priceHighRefF), alert.freq_once_per_bar)
+if bullFail
+    alert(_msg("Early bullish divergence FAILED", osc, close), alert.freq_once_per_bar)
+if bearFail
+    alert(_msg("Early bearish divergence FAILED", osc, close), alert.freq_once_per_bar)
+
+// Static alertcondition() kept for per-type alert setup in the UI.
+alertcondition(bullCondAlert and confirmed, title='Regular Bullish Divergence', message="Regular Bullish Divergence found, `Pivot Lookback Right` bars to the left of the current bar")
+alertcondition(hiddenBullCondAlert and confirmed, title='Hidden Bullish Divergence', message='Hidden Bullish Divergence found, `Pivot Lookback Right` bars to the left of the current bar')
+alertcondition(bearCondAlert and confirmed, title='Regular Bearish Divergence', message='Regular Bearish Divergence found, `Pivot Lookback Right` bars to the left of the current bar')
+alertcondition(hiddenBearCondAlert and confirmed, title='Hidden Bearish Divergence', message='Hidden Bearish Divergence found, `Pivot Lookback Right` bars to the left of the current bar')
+alertcondition(eBullAlert and confirmed, title='EARLY Regular Bullish Divergence', message='EARLY (unconfirmed) Regular Bullish Divergence')
+alertcondition(eHBullAlert and confirmed, title='EARLY Hidden Bullish Divergence', message='EARLY (unconfirmed) Hidden Bullish Divergence')
+alertcondition(eBearAlert and confirmed, title='EARLY Regular Bearish Divergence', message='EARLY (unconfirmed) Regular Bearish Divergence')
+alertcondition(eHBearAlert and confirmed, title='EARLY Hidden Bearish Divergence', message='EARLY (unconfirmed) Hidden Bearish Divergence')
+alertcondition(bullFail, title='Early Bullish Divergence FAILED', message='Early bullish divergence failed — RSI broke the pivot before confirmation')
+alertcondition(bearFail, title='Early Bearish Divergence FAILED', message='Early bearish divergence failed — RSI broke the pivot before confirmation')

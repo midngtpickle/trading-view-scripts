@@ -2,7 +2,7 @@
 // © midnight pickle
 //
 // ============================================================================
-//  PVSR Vector Zones 🌙🥒
+//  PVSR Vector Zones MP
 //  Supply/demand boxes drawn from vector (climax / above-average) candles.
 //    Bullish vector -> demand zone (support, below)
 //    Bearish vector -> supply zone (resistance, above)
@@ -17,7 +17,7 @@
 // ============================================================================
 
 //@version=6
-indicator("PVSR Vector Zones 🌙🥒", shorttitle="Vector Zones 🌙🥒", overlay=true, max_boxes_count=500)
+indicator("PVSR Vector Zones MP", shorttitle="Vector Zones MP", overlay=true, max_boxes_count=500)
 
 // ==========================================
 // 🔹 MASTER TOGGLE

@@ -2,7 +2,7 @@
 // © midnight pickle
 //
 // ============================================================================
-//  PVSR Volume 🌙🥒
+//  PVSR Volume MP
 //  Volume columns coloured by PVSRA classification, volume MA, threshold lines.
 //  Lives in its own pane.
 //
@@ -16,7 +16,7 @@
 // ============================================================================
 
 //@version=6
-indicator("PVSR Volume 🌙🥒", shorttitle="PVSR Volume 🌙🥒", overlay=false)
+indicator("PVSR Volume MP", shorttitle="PVSR Volume MP", overlay=false)
 
 // ==========================================
 // 🔹 MASTER TOGGLE

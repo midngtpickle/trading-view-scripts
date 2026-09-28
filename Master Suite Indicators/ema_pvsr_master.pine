@@ -15,7 +15,7 @@
 //   "keep the two scripts' multipliers identical" caveat is gone.
 
 //@version=6
-indicator("EMA & PVSR Master 🌙🥒", overlay=false, max_boxes_count=500)
+indicator("EMA & PVSR Master MP", overlay=false, max_boxes_count=500)
 
 // ==========================================
 // 🔹 MASTER TOGGLE - QUICK ACCESS
