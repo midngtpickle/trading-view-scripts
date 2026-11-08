@@ -11,10 +11,10 @@ Combines two previously separate indicators—**EMA & PVSR Indicators** and **PV
 
 - **6 Exponential Moving Averages (EMAs)**: Default lengths `10, 21, 50, 100, 200, 800`, each with its own toggle, length, and color. Line width is fixed at 1.
 - **3 Simple Moving Averages (SMAs)**: Default lengths `50, 100, 200`, each with its own toggle, length, and color. Line width is fixed at 2.
-- **VWAP**: TradingView's session-anchored `ta.vwap(close)`, with adjustable color and width. There is no custom anchor setting.
+- **VWAP**: TradingView's session-anchored `ta.vwap`, with a **VWAP Source** input (default `hlc3`, matching the built-in VWAP) and adjustable color and width. It resets at the start of each exchange day (00:00 UTC on Binance). There is no custom anchor setting.
 - **Crossover Detection & Visual Labels**:
   - **SMA Golden / Death Cross**: Default `50 / 200` period detection.
-  - **EMA Golden / Death Cross**: Default `9 / 21` period detection.
+  - **EMA Golden / Death Cross**: Default `10 / 21` period detection, matching the plotted EMA 1 and EMA 2 so the labels sit on a crossing you can see.
   - Independent toggles and customizable fast/slow lengths for both pairs.
 
 ---
@@ -77,7 +77,7 @@ Configured for standard TradingView alert integration:
 - **EMA Golden Cross / Death Cross**
 - **SMA Golden Cross / Death Cross**
 - **Price Crossing VWAP**
-- **Bullish / Bearish Vector Candle** (Triggered on Climax or Above-Average volume; gated by the **Show Vector Candle Alerts** setting)
+- **Bullish / Bearish Vector Candle** (Triggered on Climax or Above-Average volume; gated by the **Show Vector Candle Alerts** setting). Classification is checked while the bar forms, so create these alerts with the frequency **Once per bar close** to get each one once, on a confirmed candle.
 
 > [!TIP]
 > Each part of this script is also available as a standalone indicator in [`individual_scripts/`](../individual_scripts/) (`ema_sma_`, `pvsr_candles_`, `pvsr_volume_`, `pvsr_vector_zones_`). The standalone PVSR scripts each carry their own copy of the classification inputs, so they only agree if you set them identically. This master script has no such drift risk.
@@ -98,6 +98,11 @@ Configured for standard TradingView alert integration:
 
 ## 📝 Changelog
 
+- **v4 (8 November 2026)**
+  - EMA cross fast length default changed from 9 to 10 to match EMA 1.
+  - Added **VWAP Source** input (default `hlc3`); VWAP previously used `close`.
+  - SMA 1 default color changed from purple to aqua so it no longer matches EMA 5 (200).
+  - Vector alert tooltip recommends **Once per bar close**.
 - **v3 (2 August 2026)**
   - Added **Exclude current bar from lookback** (default: on). Average volume and volume-spread highs are measured over prior $N$ bars matching authentic PVSRA rules.
   - Added **Use volume × spread climax leg** toggle (default: on).

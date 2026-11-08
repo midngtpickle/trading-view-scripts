@@ -12,7 +12,7 @@
 // ============================================================================
 
 //@version=6
-indicator('Key Levels MP', shorttitle='Key Levels MP', overlay=true, max_lines_count=500, max_labels_count=500, max_bars_back=5000)
+indicator('Key Levels MP', shorttitle='Key Levels MP', overlay=true, max_lines_count=500, max_labels_count=500)
 
 // ============================================================================
 // ██ KEY LEVELS ██
@@ -125,22 +125,25 @@ width_py = input.int(3, 'Width', minval=1, maxval=10, group=grp_yearly, inline='
 
 // 1. Fetch Data
 // "previous period" levels use [1] + lookahead_on (confirmed prior period, non-repainting).
-// "current period" levels use no-offset + lookahead_off (developing period, updates live by design).
+// "current period" levels use no-offset + lookahead_on (developing period, updates live by design).
 //
 // WHY THE CURRENT-PERIOD PATTERN IS CORRECT HERE, AND WHERE IT IS NOT.
-// request.security(..., lookahead_off) with no offset returns two different
-// things depending on the bar: on a HISTORICAL bar it returns the last CLOSED
-// higher-timeframe value (so mid-week it hands back last week's high), and on
-// a REALTIME bar it returns the live developing value.
+// With lookahead_off and no offset, request.security only returns the live
+// developing value on a REALTIME bar; on a HISTORICAL bar it returns the last
+// CLOSED higher-timeframe value. So whenever the last bar was historical (a
+// non-24/7 ticker over the weekend, or a chart before its first live tick) the
+// "current" lines showed the PREVIOUS period's extreme.
 //
-// That is fine in this script because every key level is drawn inside
-// `if master_key and barstate.islast` — only the realtime bar is ever read, so
-// only the developing value is ever displayed. Two caveats follow from that:
-//   * In bar-replay, barstate.islast is a historical bar, so the "current"
-//     week/month/year lines will show the PREVIOUS period's extreme.
-//   * Do not reuse these variables in an alertcondition, or port them into a
-//     strategy. There the historical path is evaluated on every bar and the
-//     backtest silently trades a different series than the live script.
+// lookahead_on with no offset returns the developing period's value on the
+// last bar whether that bar is realtime or historical. On earlier historical
+// bars it would read the whole period (future data), so it is only safe
+// because every key level is drawn inside `if master_key and barstate.islast`.
+// Caveats:
+//   * Bar-replay has not been verified with this pattern; treat the "current"
+//     week/month/year lines in replay with care.
+//   * Never reuse these variables in an alertcondition, or port them into a
+//     strategy. There the historical path is evaluated on every bar and it
+//     would see the future.
 //
 // Computing these natively with a timeframe.change() reset (the way the Monday
 // range below is built) would fix the replay case, but it would BREAK the
@@ -150,24 +153,24 @@ width_py = input.int(3, 'Width', minval=1, maxval=10, group=grp_yearly, inline='
 // its result is only trustworthy on the last bar.
 
 // --- Daily ---
-d_o = request.security(syminfo.tickerid, 'D', open, lookahead=barmerge.lookahead_off)
+d_o = request.security(syminfo.tickerid, 'D', open, lookahead=barmerge.lookahead_on)
 [d_h, d_l] = request.security(syminfo.tickerid, 'D', [high[1], low[1]], lookahead=barmerge.lookahead_on)
 d_mid = (d_h + d_l) / 2
 
 // --- Weekly ---
-[cw_h, cw_l] = request.security(syminfo.tickerid, 'W', [high, low], lookahead=barmerge.lookahead_off)
+[cw_h, cw_l] = request.security(syminfo.tickerid, 'W', [high, low], lookahead=barmerge.lookahead_on)
 cw_mid = (cw_h + cw_l) / 2
 [w_h, w_l] = request.security(syminfo.tickerid, 'W', [high[1], low[1]], lookahead=barmerge.lookahead_on)
 w_mid = (w_h + w_l) / 2
 
 // --- Monthly ---
-[cm_h, cm_l] = request.security(syminfo.tickerid, 'M', [high, low], lookahead=barmerge.lookahead_off)
+[cm_h, cm_l] = request.security(syminfo.tickerid, 'M', [high, low], lookahead=barmerge.lookahead_on)
 cm_mid = (cm_h + cm_l) / 2
 [m_h, m_l] = request.security(syminfo.tickerid, 'M', [high[1], low[1]], lookahead=barmerge.lookahead_on)
 m_mid = (m_h + m_l) / 2
 
 // --- Yearly ---
-[cy_h, cy_l, cy_o] = request.security(syminfo.tickerid, '12M', [high, low, open], lookahead=barmerge.lookahead_off)
+[cy_h, cy_l, cy_o] = request.security(syminfo.tickerid, '12M', [high, low, open], lookahead=barmerge.lookahead_on)
 cy_mid = (cy_h + cy_l) / 2
 [py_h, py_l] = request.security(syminfo.tickerid, '12M', [high[1], low[1]], lookahead=barmerge.lookahead_on)
 py_mid = (py_h + py_l) / 2
@@ -248,19 +251,10 @@ asia_disp_mid = (asia_disp_h + asia_disp_l) / 2
 var active_key_lines = array.new_line()
 var active_key_labels = array.new_label()
 
+// Rounds to the instrument's own tick size (e.g. 0.01 for silver/gold/ETH,
+// 0.1 for BTC perps), so labels never drop a decimal the market quotes.
 format_price(price) =>
-    if syminfo.mintick < 0.00001
-        str.tostring(price, "#.#####")
-    else if syminfo.mintick < 0.0001
-        str.tostring(price, "#.####")
-    else if syminfo.mintick < 0.001
-        str.tostring(price, "#.###")
-    else if syminfo.mintick < 0.01
-        str.tostring(price, "#.##")
-    else if syminfo.mintick < 0.1
-        str.tostring(price, "#.#")
-    else
-        str.tostring(math.round(price))
+    str.tostring(price, format.mintick)
 
 merge_or_add_level(prices, names, colors, widths, styles, show, price, name, col, w, s) =>
     if show and not na(price)

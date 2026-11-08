@@ -55,13 +55,13 @@ col_ema6  = input.color(color.red,    title="", inline="e6", group="📈 EMA Set
 
 // --- EMA Crossover Settings ---
 show_ema_cross_labels = input.bool(true, title="Show EMA Cross Labels", group="🔄 EMA Crossover Settings")
-len_ema_cross_fast    = input.int(9,  title="Fast Length", group="🔄 EMA Crossover Settings")
+len_ema_cross_fast    = input.int(10, title="Fast Length", group="🔄 EMA Crossover Settings", tooltip="Default 10 matches EMA 1, so the cross labels mark a crossing you can see on the chart.")
 len_ema_cross_slow    = input.int(21, title="Slow Length", group="🔄 EMA Crossover Settings")
 
 // --- SMA Individual Settings ---
 show_sma1 = input.bool(true, title="Show SMA 1", inline="s1", group="📊 SMA Settings")
 len_sma1  = input.int(50,  title="", inline="s1", group="📊 SMA Settings")
-col_sma1  = input.color(color.purple,  title="", inline="s1", group="📊 SMA Settings")
+col_sma1  = input.color(color.aqua,    title="", inline="s1", group="📊 SMA Settings")
 
 show_sma2 = input.bool(true, title="Show SMA 2", inline="s2", group="📊 SMA Settings")
 len_sma2  = input.int(100, title="", inline="s2", group="📊 SMA Settings")
@@ -80,6 +80,7 @@ len_sma_cross_slow    = input.int(200, title="Slow Length", group="🔄 SMA Cros
 show_vwap = input.bool(true, title="Show VWAP", group="📉 VWAP Settings")
 col_vwap  = input.color(color.orange, title="VWAP Color", group="📉 VWAP Settings")
 wid_vwap  = input.int(2, title="VWAP Width", minval=1, group="📉 VWAP Settings")
+src_vwap  = input.source(hlc3, title="VWAP Source", group="📉 VWAP Settings", tooltip="hlc3 matches TradingView's built-in VWAP. The anchor resets at the start of each exchange day (00:00 UTC on Binance, 13:00 NZDT).")
 
 // ==========================================
 // 🔹 CALCULATIONS - EMA/SMA/VWAP
@@ -106,7 +107,7 @@ sma_c_slow   = ta.sma(close, len_sma_cross_slow)
 golden_cross = ta.crossover(sma_c_fast, sma_c_slow)
 death_cross  = ta.crossunder(sma_c_fast, sma_c_slow)
 
-vwap_value = ta.vwap(close)
+vwap_value = ta.vwap(src_vwap)
 
 // ==========================================
 // 🔹 PLOTTING

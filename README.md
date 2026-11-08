@@ -37,7 +37,7 @@ A curated collection of modular, production-ready Pine Script v6 indicators and 
   - **Above-Average (Blue/Violet)**: Volume ≥ 1.5× average.
   - **Regular (Gray)**: Normal trading activity.
 - **Dynamic Vector Zones** (off by default): Order-flow supply (bearish vector) and demand (bullish vector) boxes with close or wick mitigation and a per-side zone cap.
-- **Moving Average Suite**: 6 configurable EMAs (10, 21, 50, 100, 200, 800), 3 SMAs (50, 100, 200), session VWAP, and independent EMA (9/21) and SMA (50/200) golden / death cross labels.
+- **Moving Average Suite**: 6 configurable EMAs (10, 21, 50, 100, 200, 800), 3 SMAs (50, 100, 200), session VWAP, and independent EMA (10/21) and SMA (50/200) golden / death cross labels.
 - **Integrated Alerts**: EMA and SMA crosses, price crossing VWAP, and bullish / bearish vector candles.
 
 📖 **Detailed Documentation**: [ema_pvsr_master.description.md](Master%20Suite%20Indicators/ema_pvsr_master.description.md)

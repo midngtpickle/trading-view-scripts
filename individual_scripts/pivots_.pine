@@ -13,7 +13,7 @@
 // ============================================================================
 
 //@version=6
-indicator('Pivots MP', shorttitle='Pivots MP', overlay=true, max_lines_count=500, max_labels_count=500, max_bars_back=5000)
+indicator('Pivots MP', shorttitle='Pivots MP', overlay=true, max_lines_count=500, max_labels_count=500)
 
 // ============================================================================
 // ██ PIVOTS ██
@@ -48,7 +48,7 @@ enable_pivots = input.bool(true, '🔥 Master Toggle: Pivots', group=grp_piv)
 // Inputs
 kind = input.string(title = 'Calculation Method', defval = 'Camarilla', options = [FIBONACCI, CAMARILLA], group = grp_piv)
 pivot_time_frame = input.string(title = 'Timeframe', defval = DAILY, options = [AUTO, HOURLY, DAILY, WEEKLY, MONTHLY, QUARTERLY, YEARLY, BIYEARLY, TRIYEARLY, QUINQUENNIAL], group = grp_piv)
-look_back = input.int(title = 'Lookback Period', defval = 1, minval = 1, maxval = 5000, tooltip = 'How many past periods of pivots to keep drawn. Note: total drawn objects (segments x enabled levels) share the 500 line / 500 label cap for this indicator.', group = grp_piv)
+look_back = input.int(title = 'Lookback Period', defval = 1, minval = 1, maxval = 45, tooltip = 'How many past periods of pivots to keep drawn. Each period draws up to 11 lines and 11 labels against the 500 line / 500 label cap, so 45 is the most that fits with every level on.', group = grp_piv)
 is_daily_based = input.bool(title = 'Use Daily-based Values', defval = true, tooltip = 'Use daily OHLC values even on intraday charts', group = grp_piv)
 show_labels = input.bool(title = 'Show Labels', defval = true, group = grp_piv_vis)
 position_labels = input.string('Left', 'Label Position', options = ['Left', 'Right'], group = grp_piv_vis)
@@ -70,7 +70,7 @@ s4r4_color = input.color(color.green, 'S4/R4 Color', group = grp_piv_col)
 s5r5_color = input.color(color.navy, 'S5/R5 Color', group = grp_piv_col)
 
 // Alert Settings
-use_close = input.bool(true, 'Use Close Price for Alerts', tooltip = 'When enabled, alerts trigger when the close CROSSES the level. When disabled, alerts trigger on price touch (bar range straddles the level).', group = grp_piv_alert)
+use_close = input.bool(true, 'Use Close Price for Alerts', tooltip = 'When enabled, alerts trigger when the close CROSSES the level. When disabled, alerts trigger on price touch (bar range straddles the level). To get each alert once, create it with the frequency "Once per bar close"; touch alerts set to "Once per bar" fire on the developing bar.', group = grp_piv_alert)
 
 // Arrays for storing pivot data
 var arr_time = array.new_int()
@@ -301,11 +301,15 @@ if is_time_change
     change_time := time
     change_time
 
-if not uses_current_bar and is_time_change or uses_current_bar and not na(sec_open_gaps_on)
+// Multi-year periods (Biyearly/Triyearly/Quinquennial) always roll on is_time_change,
+// which waits for the 2nd/3rd/5th year; the gaps_on test fires every year. Their
+// high/low/open also span the whole multi-year period, accumulated in pivotX_*,
+// instead of only the last 12M bar.
+if (not uses_current_bar or custom_years_resolution) and is_time_change or uses_current_bar and not custom_years_resolution and not na(sec_open_gaps_on)
     if is_daily_based
-        pivotX_prev_open := sec_open[1]
-        pivotX_prev_high := sec_high[1]
-        pivotX_prev_low := sec_low[1]
+        pivotX_prev_open := custom_years_resolution ? pivotX_open : sec_open[1]
+        pivotX_prev_high := custom_years_resolution ? math.max(pivotX_high, sec_high[1]) : sec_high[1]
+        pivotX_prev_low := custom_years_resolution ? math.min(pivotX_low, sec_low[1]) : sec_low[1]
         pivotX_prev_close := sec_close[1]
         pivotX_open := sec_open
         pivotX_high := sec_high
@@ -388,17 +392,21 @@ r5_val = get_current_pivot_value(r5)
 s5_val = get_current_pivot_value(s5)
 
 // Precompute crosses so "Use Close" alerts actually fire.
-p_cross  = ta.cross(close, p_val)
-r1_cross = ta.cross(close, r1_val)
-s1_cross = ta.cross(close, s1_val)
-r2_cross = ta.cross(close, r2_val)
-s2_cross = ta.cross(close, s2_val)
-r3_cross = ta.cross(close, r3_val)
-s3_cross = ta.cross(close, s3_val)
-r4_cross = ta.cross(close, r4_val)
-s4_cross = ta.cross(close, s4_val)
-r5_cross = ta.cross(close, r5_val)
-s5_cross = ta.cross(close, s5_val)
+// A cross only counts while the level is unchanged from the previous bar. On the
+// bar where a new period's pivots replace the old ones, ta.cross compares the old
+// level with the new one, and a level that jumps to the other side of price
+// would otherwise read as a cross that price never made.
+p_cross  = ta.cross(close, p_val) and p_val == p_val[1]
+r1_cross = ta.cross(close, r1_val) and r1_val == r1_val[1]
+s1_cross = ta.cross(close, s1_val) and s1_val == s1_val[1]
+r2_cross = ta.cross(close, r2_val) and r2_val == r2_val[1]
+s2_cross = ta.cross(close, s2_val) and s2_val == s2_val[1]
+r3_cross = ta.cross(close, r3_val) and r3_val == r3_val[1]
+s3_cross = ta.cross(close, s3_val) and s3_val == s3_val[1]
+r4_cross = ta.cross(close, r4_val) and r4_val == r4_val[1]
+s4_cross = ta.cross(close, s4_val) and s4_val == s4_val[1]
+r5_cross = ta.cross(close, r5_val) and r5_val == r5_val[1]
+s5_cross = ta.cross(close, s5_val) and s5_val == s5_val[1]
 
 // Alert Conditions (gated by the pivot master toggle)
 // use_close = true  -> close crosses the level

@@ -66,8 +66,8 @@ Write docs from the code, not from memory: state real defaults, real option name
 - **`camarilla_range_bounce.pine`** uses textbook levels (R3 = H3, R4 = H4). So the indicator's R3 is the strategy's R4. Keep the warning about this in both docs.
 
 ### Pine patterns used here
-- **Previous-period data:** `request.security(..., expr[1], lookahead = barmerge.lookahead_on)`. The `[1]` is what makes lookahead safe. Never use `lookahead_on` without it.
-- **Current developing HTF levels** use `lookahead_off` with no offset and are only drawn on `barstate.islast`. They are wrong on historical bars (and in Bar Replay). Don't feed them into alerts or strategies.
+- **Previous-period data:** `request.security(..., expr[1], lookahead = barmerge.lookahead_on)`. The `[1]` is what makes lookahead safe. Never use `lookahead_on` without it, except for the last-bar-only current levels below.
+- **Current developing HTF levels** use `lookahead_on` with no offset and are only drawn on `barstate.islast`, where that returns the developing period whether the last bar is realtime or historical (closed markets). On earlier bars it reads future data, so this is the one allowed `lookahead_on` without `[1]`: never feed these values into alerts or strategies. (`lookahead_off` showed the previous period whenever the last bar was historical.)
 - **Object budget:** 500 lines / labels / boxes per script. Redraw on the last bar and delete old objects rather than drawing per bar.
 - **Timezones:** anchor sessions to the exchange that sets the schedule (`America/New_York`, `Asia/Tokyo`, `UTC`), never to NZ local time. NZ and US DST flip about five weeks apart.
 - **No `timeframe=` in `indicator()`** for scripts that call `alert()` or `line.new()` — Pine rejects it (CE10080).
