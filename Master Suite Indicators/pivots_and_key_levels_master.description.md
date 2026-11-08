@@ -12,11 +12,11 @@ Unifies a multi-timeframe pivot point calculation engine (**Fibonacci** and **Ca
 - **Calculation Methods** (default **Camarilla**):
   - **Fibonacci Pivots** (0.382 / 0.618 / 1.0 / 1.272 / 1.618 × prior range)
   - **Camarilla Pivots** (Custom institutional variant, see below)
-- **Timeframe Resolution** (default **Daily**): Auto, Hourly, Daily, Weekly, Monthly, Quarterly, Yearly, Biyearly, Triyearly, Quinquennial. `Auto` uses Daily on charts ≤15m, Weekly on higher intraday charts, Monthly on daily charts, and Yearly on weekly/monthly charts.
+- **Timeframe Resolution** (default **Daily**): Auto, Hourly, Daily, Weekly, Monthly, Quarterly, Yearly, Biyearly, Triyearly, Quinquennial. Biyearly, Triyearly and Quinquennial roll over only every 2nd, 3rd or 5th year (on intraday charts too) and use the high, low and open of the whole multi-year period. `Auto` uses Daily on charts ≤15m, Weekly on higher intraday charts, Monthly on daily charts, and Yearly on weekly/monthly charts.
 - **Use Daily-based Values** (default on): Build the pivot period from requested OHLC data rather than from the chart's own bars.
-- **Historical Lookback** (default `1`): How many past pivot periods stay drawn. Raise it with care; it shares the object budget with the key levels.
+- **Historical Lookback** (default `1`): How many past pivot periods stay drawn. Maximum `40` (`45` in the standalone `pivots_.pine`), the most that fits the 500-line / 500-label budget with every level on; it shares that budget with the key levels.
 - **Visuals & Labels**: Toggle level pairs (P, R1/S1 … R5/S5), set a color per pair, and place labels at the left or right edge of each segment. Pivot line style and width are not configurable.
-- **Integrated Level Alerts**: One alert condition per level (P, R1–R5, S1–S5). **Use Close Price for Alerts** on (default) fires when the close crosses the level; off fires when the bar's range touches it.
+- **Integrated Level Alerts**: One alert condition per level (P, R1–R5, S1–S5). **Use Close Price for Alerts** on (default) fires when the close crosses the level; off fires when the bar's range touches it. A cross only counts while the level is unchanged from the previous bar, so a new period's levels jumping to the other side of price don't fire a false cross. Create these alerts with the frequency **Once per bar close** to get each one once.
 
 ### Camarilla Level Shift & Architecture
 
@@ -50,7 +50,7 @@ Automatically draws and tracks market reference levels across six groups:
 - **Monthly**: Current Month High/Low/50% (live developing), Previous Month High (`PMH`), Low (`PML`), and 50%.
 - **Yearly**: Current Year Open/High/Low/50% (live developing), Previous Year High (`PYH`), Low (`PYL`), and 50%.
 
-Key levels are drawn as short lines on the latest bar (default `10` bars long) with the price in the label.
+Key levels are drawn as short lines on the latest bar (default `10` bars long) with the price in the label, rounded to the instrument's tick size.
 
 ---
 
@@ -78,8 +78,8 @@ When multiple key levels sit within the **Merge Tolerance** (default `2` ticks),
 > Pivot segments and key level lines redraw on the current bar rather than writing historical drawing objects bar-by-bar. This maintains high responsiveness and avoids hitting TradingView's platform ceiling of 500 lines and 500 labels.
 
 > [!WARNING]
-> **Bar Replay Behavior**:
-> Current developing periods (Current Week, Month, Year) use `request.security` with `lookahead_off` and no offset. On a live chart the last bar is realtime, so they track the developing period correctly. In Bar Replay the last bar is historical, and on historical bars that call returns the **last closed** period, so the "current" week/month/year lines show the **previous** period's extremes. The Asia Session and Monday Range are built from chart bars and are correct in replay.
+> **Current-Period Levels & Bar Replay**:
+> Current developing periods (Daily Open, Current Week, Month, Year) use `request.security` with `lookahead_on` and no offset, and are drawn only on the last bar. There that call returns the developing period whether the last bar is realtime or historical, so the lines are right on a live chart and on a closed market (e.g. OANDA gold or silver over the weekend). With `lookahead_off`, which earlier versions used, a historical last bar showed the **previous** period's extremes. Bar Replay has not been verified with this pattern. The Asia Session and Monday Range are built from chart bars and are correct in replay.
 >
 > For the same reason, don't reuse the current-period values in an alert condition or port them into a strategy.
 
@@ -90,6 +90,13 @@ When multiple key levels sit within the **Merge Tolerance** (default `2` ticks),
 
 ## 📝 Changelog
 
+- **v3 (8 November 2026)**
+  - Pivot cross alerts no longer fire on the bar where a new period's levels replace the old ones.
+  - Current-period key levels (Daily Open, CW, CM, CY) switched to `lookahead_on` with no offset, so they no longer show the previous period when the last bar is historical.
+  - Key level labels round to the instrument's tick size (`format.mintick`) instead of one decimal fewer.
+  - Lookback capped at 40; removed the unused `max_bars_back=5000`.
+  - Biyearly / Triyearly / Quinquennial pivots fixed on intraday charts and now use the full multi-year range.
+  - Alert tooltip recommends **Once per bar close**.
 - **v2 (2 August 2026)**
   - Fully documented the $R_1 \dots R_5$ Camarilla level mapping shift in code comments and UI tooltips on R3, R4, and R5 toggles.
   - Documented `request.security` behavior and Bar Replay characteristics for current developing HTF levels.

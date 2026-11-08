@@ -25,7 +25,7 @@ master_show_pvsr = input.bool(true, title="🔘 MASTER: Show PVSR Candles", grou
 show_pvsr_candles = input.bool(true, title="Show PVSR Candles", group="🕯️ PVSR Candle Settings")
 
 // --- Alert Settings ---
-show_vector_alerts = input.bool(true, title="Show Vector Candle Alerts", group="🔔 Alert Settings")
+show_vector_alerts = input.bool(true, title="Show Vector Candle Alerts", group="🔔 Alert Settings", tooltip="Vector classification is checked while the bar forms, so a bar can qualify and then drop out before it closes. Create these alerts with the frequency \"Once per bar close\" to get each one once, on a confirmed candle.")
 
 // ==========================================
 // 🔹 PVSR CLASSIFICATION INPUTS

@@ -13,7 +13,7 @@
 // ============================================================================
 
 //@version=6
-indicator('Pivots + Key Levels MP', shorttitle='Pivots+Levels MP', overlay=true, max_lines_count=500, max_labels_count=500, max_bars_back=5000)
+indicator('Pivots + Key Levels MP', shorttitle='Pivots+Levels MP', overlay=true, max_lines_count=500, max_labels_count=500)
 
 
 // ============================================================================
@@ -49,7 +49,7 @@ enable_pivots = input.bool(true, '🔥 Master Toggle: Pivots', group=grp_piv)
 // Inputs
 kind = input.string(title = 'Calculation Method', defval = 'Camarilla', options = [FIBONACCI, CAMARILLA], group = grp_piv)
 pivot_time_frame = input.string(title = 'Timeframe', defval = DAILY, options = [AUTO, HOURLY, DAILY, WEEKLY, MONTHLY, QUARTERLY, YEARLY, BIYEARLY, TRIYEARLY, QUINQUENNIAL], group = grp_piv)
-look_back = input.int(title = 'Lookback Period', defval = 1, minval = 1, maxval = 5000, tooltip = 'How many past periods of pivots to keep drawn. Note: total drawn objects (segments x enabled levels) share the 500 line / 500 label cap with the Key Levels below.', group = grp_piv)
+look_back = input.int(title = 'Lookback Period', defval = 1, minval = 1, maxval = 40, tooltip = 'How many past periods of pivots to keep drawn. Each period draws up to 11 lines and 11 labels, and they share the 500 line / 500 label cap with the ~27 Key Levels below, so 40 is the most that fits with every level on.', group = grp_piv)
 is_daily_based = input.bool(title = 'Use Daily-based Values', defval = true, tooltip = 'Use daily OHLC values even on intraday charts', group = grp_piv)
 show_labels = input.bool(title = 'Show Labels', defval = true, group = grp_piv_vis)
 position_labels = input.string('Left', 'Label Position', options = ['Left', 'Right'], group = grp_piv_vis)
@@ -71,7 +71,7 @@ s4r4_color = input.color(color.green, 'S4/R4 Color', group = grp_piv_col)
 s5r5_color = input.color(color.navy, 'S5/R5 Color', group = grp_piv_col)
 
 // Alert Settings
-use_close = input.bool(true, 'Use Close Price for Alerts', tooltip = 'When enabled, alerts trigger when the close CROSSES the level. When disabled, alerts trigger on price touch (bar range straddles the level).', group = grp_piv_alert)
+use_close = input.bool(true, 'Use Close Price for Alerts', tooltip = 'When enabled, alerts trigger when the close CROSSES the level. When disabled, alerts trigger on price touch (bar range straddles the level). To get each alert once, create it with the frequency "Once per bar close"; touch alerts set to "Once per bar" fire on the developing bar.', group = grp_piv_alert)
 
 // Arrays for storing pivot data
 var arr_time = array.new_int()
@@ -302,11 +302,15 @@ if is_time_change
     change_time := time
     change_time
 
-if not uses_current_bar and is_time_change or uses_current_bar and not na(sec_open_gaps_on)
+// Multi-year periods (Biyearly/Triyearly/Quinquennial) always roll on is_time_change,
+// which waits for the 2nd/3rd/5th year; the gaps_on test fires every year. Their
+// high/low/open also span the whole multi-year period, accumulated in pivotX_*,
+// instead of only the last 12M bar.
+if (not uses_current_bar or custom_years_resolution) and is_time_change or uses_current_bar and not custom_years_resolution and not na(sec_open_gaps_on)
     if is_daily_based
-        pivotX_prev_open := sec_open[1]
-        pivotX_prev_high := sec_high[1]
-        pivotX_prev_low := sec_low[1]
+        pivotX_prev_open := custom_years_resolution ? pivotX_open : sec_open[1]
+        pivotX_prev_high := custom_years_resolution ? math.max(pivotX_high, sec_high[1]) : sec_high[1]
+        pivotX_prev_low := custom_years_resolution ? math.min(pivotX_low, sec_low[1]) : sec_low[1]
         pivotX_prev_close := sec_close[1]
         pivotX_open := sec_open
         pivotX_high := sec_high
@@ -389,17 +393,21 @@ r5_val = get_current_pivot_value(r5)
 s5_val = get_current_pivot_value(s5)
 
 // Precompute crosses so "Use Close" alerts actually fire.
-p_cross  = ta.cross(close, p_val)
-r1_cross = ta.cross(close, r1_val)
-s1_cross = ta.cross(close, s1_val)
-r2_cross = ta.cross(close, r2_val)
-s2_cross = ta.cross(close, s2_val)
-r3_cross = ta.cross(close, r3_val)
-s3_cross = ta.cross(close, s3_val)
-r4_cross = ta.cross(close, r4_val)
-s4_cross = ta.cross(close, s4_val)
-r5_cross = ta.cross(close, r5_val)
-s5_cross = ta.cross(close, s5_val)
+// A cross only counts while the level is unchanged from the previous bar. On the
+// bar where a new period's pivots replace the old ones, ta.cross compares the old
+// level with the new one, and a level that jumps to the other side of price
+// would otherwise read as a cross that price never made.
+p_cross  = ta.cross(close, p_val) and p_val == p_val[1]
+r1_cross = ta.cross(close, r1_val) and r1_val == r1_val[1]
+s1_cross = ta.cross(close, s1_val) and s1_val == s1_val[1]
+r2_cross = ta.cross(close, r2_val) and r2_val == r2_val[1]
+s2_cross = ta.cross(close, s2_val) and s2_val == s2_val[1]
+r3_cross = ta.cross(close, r3_val) and r3_val == r3_val[1]
+s3_cross = ta.cross(close, s3_val) and s3_val == s3_val[1]
+r4_cross = ta.cross(close, r4_val) and r4_val == r4_val[1]
+s4_cross = ta.cross(close, s4_val) and s4_val == s4_val[1]
+r5_cross = ta.cross(close, r5_val) and r5_val == r5_val[1]
+s5_cross = ta.cross(close, s5_val) and s5_val == s5_val[1]
 
 // Alert Conditions (gated by the pivot master toggle)
 // use_close = true  -> close crosses the level
@@ -596,22 +604,25 @@ width_py = input.int(3, 'Width', minval=1, maxval=10, group=grp_yearly, inline='
 
 // 1. Fetch Data
 // "previous period" levels use [1] + lookahead_on (confirmed prior period, non-repainting).
-// "current period" levels use no-offset + lookahead_off (developing period, updates live by design).
+// "current period" levels use no-offset + lookahead_on (developing period, updates live by design).
 //
 // WHY THE CURRENT-PERIOD PATTERN IS CORRECT HERE, AND WHERE IT IS NOT.
-// request.security(..., lookahead_off) with no offset returns two different
-// things depending on the bar: on a HISTORICAL bar it returns the last CLOSED
-// higher-timeframe value (so mid-week it hands back last week's high), and on
-// a REALTIME bar it returns the live developing value.
+// With lookahead_off and no offset, request.security only returns the live
+// developing value on a REALTIME bar; on a HISTORICAL bar it returns the last
+// CLOSED higher-timeframe value. So whenever the last bar was historical (a
+// non-24/7 ticker over the weekend, or a chart before its first live tick) the
+// "current" lines showed the PREVIOUS period's extreme.
 //
-// That is fine in this script because every key level is drawn inside
-// `if master_key and barstate.islast` — only the realtime bar is ever read, so
-// only the developing value is ever displayed. Two caveats follow from that:
-//   * In bar-replay, barstate.islast is a historical bar, so the "current"
-//     week/month/year lines will show the PREVIOUS period's extreme.
-//   * Do not reuse these variables in an alertcondition, or port them into a
-//     strategy. There the historical path is evaluated on every bar and the
-//     backtest silently trades a different series than the live script.
+// lookahead_on with no offset returns the developing period's value on the
+// last bar whether that bar is realtime or historical. On earlier historical
+// bars it would read the whole period (future data), so it is only safe
+// because every key level is drawn inside `if master_key and barstate.islast`.
+// Caveats:
+//   * Bar-replay has not been verified with this pattern; treat the "current"
+//     week/month/year lines in replay with care.
+//   * Never reuse these variables in an alertcondition, or port them into a
+//     strategy. There the historical path is evaluated on every bar and it
+//     would see the future.
 //
 // Computing these natively with a timeframe.change() reset (the way the Monday
 // range below is built) would fix the replay case, but it would BREAK the
@@ -621,24 +632,24 @@ width_py = input.int(3, 'Width', minval=1, maxval=10, group=grp_yearly, inline='
 // its result is only trustworthy on the last bar.
 
 // --- Daily ---
-d_o = request.security(syminfo.tickerid, 'D', open, lookahead=barmerge.lookahead_off)
+d_o = request.security(syminfo.tickerid, 'D', open, lookahead=barmerge.lookahead_on)
 [d_h, d_l] = request.security(syminfo.tickerid, 'D', [high[1], low[1]], lookahead=barmerge.lookahead_on)
 d_mid = (d_h + d_l) / 2
 
 // --- Weekly ---
-[cw_h, cw_l] = request.security(syminfo.tickerid, 'W', [high, low], lookahead=barmerge.lookahead_off)
+[cw_h, cw_l] = request.security(syminfo.tickerid, 'W', [high, low], lookahead=barmerge.lookahead_on)
 cw_mid = (cw_h + cw_l) / 2
 [w_h, w_l] = request.security(syminfo.tickerid, 'W', [high[1], low[1]], lookahead=barmerge.lookahead_on)
 w_mid = (w_h + w_l) / 2
 
 // --- Monthly ---
-[cm_h, cm_l] = request.security(syminfo.tickerid, 'M', [high, low], lookahead=barmerge.lookahead_off)
+[cm_h, cm_l] = request.security(syminfo.tickerid, 'M', [high, low], lookahead=barmerge.lookahead_on)
 cm_mid = (cm_h + cm_l) / 2
 [m_h, m_l] = request.security(syminfo.tickerid, 'M', [high[1], low[1]], lookahead=barmerge.lookahead_on)
 m_mid = (m_h + m_l) / 2
 
 // --- Yearly ---
-[cy_h, cy_l, cy_o] = request.security(syminfo.tickerid, '12M', [high, low, open], lookahead=barmerge.lookahead_off)
+[cy_h, cy_l, cy_o] = request.security(syminfo.tickerid, '12M', [high, low, open], lookahead=barmerge.lookahead_on)
 cy_mid = (cy_h + cy_l) / 2
 [py_h, py_l] = request.security(syminfo.tickerid, '12M', [high[1], low[1]], lookahead=barmerge.lookahead_on)
 py_mid = (py_h + py_l) / 2
@@ -719,19 +730,10 @@ asia_disp_mid = (asia_disp_h + asia_disp_l) / 2
 var active_key_lines = array.new_line()
 var active_key_labels = array.new_label()
 
+// Rounds to the instrument's own tick size (e.g. 0.01 for silver/gold/ETH,
+// 0.1 for BTC perps), so labels never drop a decimal the market quotes.
 format_price(price) =>
-    if syminfo.mintick < 0.00001
-        str.tostring(price, "#.#####")
-    else if syminfo.mintick < 0.0001
-        str.tostring(price, "#.####")
-    else if syminfo.mintick < 0.001
-        str.tostring(price, "#.###")
-    else if syminfo.mintick < 0.01
-        str.tostring(price, "#.##")
-    else if syminfo.mintick < 0.1
-        str.tostring(price, "#.#")
-    else
-        str.tostring(math.round(price))
+    str.tostring(price, format.mintick)
 
 merge_or_add_level(prices, names, colors, widths, styles, show, price, name, col, w, s) =>
     if show and not na(price)
